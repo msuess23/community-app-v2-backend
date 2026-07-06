@@ -1,0 +1,33 @@
+# Prerequisites
+*.d
+*.sqlite3
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Logs
+*.log
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/workspace.json
