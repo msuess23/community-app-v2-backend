@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import computed_field
 
 class Settings(BaseSettings):
   # App configuration
@@ -16,6 +17,13 @@ class Settings(BaseSettings):
   POSTGRES_DB: str
   POSTGRES_HOST: str
   POSTGRES_PORT: int
+
+  # Email Configuration (New)
+  SMTP_HOST: str = ""
+  SMTP_PORT: int = 587
+  SMTP_USER: str = ""
+  SMTP_PASSWORD: str = ""
+  SMTP_TLS: bool = True
 
   # Construct the DATABASE_URL dynamically from atomic variables
   @computed_field

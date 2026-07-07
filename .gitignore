@@ -31,3 +31,6 @@ coverage.xml
 # IDEs
 .idea/
 .vscode/workspace.json
+
+# Alembic ignores
+alembic/versions/*.pyc
