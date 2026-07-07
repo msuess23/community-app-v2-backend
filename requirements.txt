@@ -10,10 +10,11 @@ alembic>=1.13.1             # DB Migrations & History Tables
 
 # --- Validation & Configuration ---
 pydantic>=2.6.0             # Request Validation (Inbound)
+pydantic[email]>=2.6.0      # Email validation
 pydantic-settings>=2.1.0    # Env Variables
 
 # --- Security & Authentication ---
-passlib[bcrypt]>=1.7.4      # PW Hashing
+bcrypt>=4.1.2               # PW Hashing
 PyJWT>=2.8.0                # Tokens
 
 # --- Support ---

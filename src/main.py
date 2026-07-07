@@ -4,6 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.core.config import settings
 from src.core.exceptions import DomainException, domain_exception_handler
 
+import src.user.models
+import src.office.models
+import src.auth.models
+
+from src.auth.router import router as auth_router
+from src.user.router import router as user_router
+
 # Initialize the FastAPI application
 app = FastAPI(
   title=settings.PROJECT_NAME,
@@ -24,9 +31,17 @@ app.add_middleware(
 app.add_exception_handler(DomainException, domain_exception_handler)
 
 # --- Router Registration ---
-# We will include our domain routers here later. Example:
-# from src.auth.router import router as auth_router
-# app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["Authentication"])
+app.include_router(
+  auth_router, 
+  prefix=f"{settings.BASE_URL}/auth", 
+  tags=["Authentication"]
+)
+
+app.include_router(
+  user_router,
+  prefix=f"{settings.BASE_URL}/users",
+  tags=["Users"]
+)
 
 @app.get("/")
 async def root():

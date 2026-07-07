@@ -1,6 +1,6 @@
 import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Enum, ForeignKey, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -25,7 +25,7 @@ class User(Base):
   role = Column(Enum(Role), default=Role.CITIZEN)
   office_id = Column(UUID(as_uuid=True), ForeignKey("offices.id"), nullable=True)
   is_active = Column(Boolean, default=True)
-  created_at = Column(DateTime, default=datetime.utcnow)
+  created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
   # Relationship to history (for audit trail)
   history = relationship("UserHistory", back_populates="user")
@@ -43,7 +43,7 @@ class UserHistory(Base):
   role = Column(Enum(Role))
   
   # Audit metadata
-  changed_at = Column(DateTime, default=datetime.utcnow)
+  changed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
   changed_by_user_id = Column(UUID(as_uuid=True))
   change_reason = Column(String, nullable=False)
 
