@@ -18,7 +18,7 @@ def send_otp_email(recipient_email: str, otp_code: str):
     f"Sie haben das Zurücksetzen Ihres Passworts angefordert.\n"
     f"Ihr 6-stelliger Bestätigungscode lautet: {otp_code}\n\n"
     f"Dieser Code ist für 15 Minuten gültig.\n\n"
-    f"Mit freundlichen Grüßen,\nIhr Fachverfahren-Team"
+    f"Mit freundlichen Grüßen,\nIhr Community-App-Team"
   )
   msg["Subject"] = "Ihr Passwort-Reset Code"
   msg["From"] = settings.SMTP_USER
