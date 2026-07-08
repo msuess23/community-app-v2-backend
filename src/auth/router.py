@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Depends, Body, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-import jwt
 
 from src.core.config import settings
 from src.core.database import get_db
 from src.core.security import verify_password, create_access_token, create_refresh_token
 from src.core.exceptions import UnauthorizedException
-from src.user.repository import get_by_email
+from src.user.repository import UserRepository
 from src.auth.service import AuthService
 from src.auth.models import BlacklistedToken
 from src.user.schemas import UserCreate, UserResponse
@@ -30,7 +29,8 @@ async def login(
   form_data: OAuth2PasswordRequestForm = Depends(),
   db: AsyncSession = Depends(get_db)
 ):
-  user = await get_by_email(db, email=form_data.username)
+  """Authenticates a user and returns JWT tokens."""
+  user = await UserRepository.get_by_email(db, email=form_data.username)
   if not user or not verify_password(form_data.password, user.hashed_password):
     raise UnauthorizedException("Incorrect email or password")
   
@@ -66,13 +66,9 @@ async def logout(
   token: str = Depends(oauth2_scheme),
   db: AsyncSession = Depends(get_db)
 ):
-  """
-  Invalidates the current access token (and optionally the refresh token).
-  """
-  # Block access token
+  """Invalidates the current access token (and optionally the refresh token)."""
   db.add(BlacklistedToken(token=token))
   
-  # Block refresh token if exists
   if refresh_token:
     db.add(BlacklistedToken(token=refresh_token))
     
