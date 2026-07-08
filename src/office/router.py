@@ -1,5 +1,5 @@
 import uuid
-from typing import List
+from typing import List, Optional, Tuple
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +18,7 @@ router = APIRouter()
 @router.get("", response_model=List[OfficeResponse])
 async def get_all_offices(
   q: Optional[str] = Query(None, description="Search term for office name or description"),
-  bbox: Optional[Tuple[float, float, float, float]] = Depends(get_bbox_filter,  description="Bounding Box: minLon,minLat,maxLon,maxLat"),
+  bbox: Optional[Tuple[float, float, float, float]] = Depends(get_bbox_filter),
   skip: int = 0,
   limit: int = 100,
   include_inactive: bool = False,
@@ -31,7 +31,7 @@ async def get_all_offices(
   return await OfficeService.get_all_offices(
     db=db, skip=skip, limit=limit, include_inactive=False, search=q, bbox=bbox
   )
-  
+
 
 @router.get("/{office_id}", response_model=OfficeResponse)
 async def get_office(

@@ -7,6 +7,7 @@ from src.core.exceptions import DomainException
 from src.office.models import Office, OfficeHistory
 from src.office.schemas import OfficeCreate, OfficeUpdate
 from src.office.repository import OfficeRepository
+from src.address.service import AddressService
 
 class OfficeService:
   """

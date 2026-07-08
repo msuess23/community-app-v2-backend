@@ -1,7 +1,8 @@
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 
 from src.office.models import Office, OfficeHistory
 from src.address.models import Address
