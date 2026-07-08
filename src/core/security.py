@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import jwt
 import bcrypt
+import uuid
 from src.core.config import settings
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

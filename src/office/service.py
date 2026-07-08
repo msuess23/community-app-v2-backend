@@ -1,15 +1,16 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import DomainException
 from src.office.models import Office, OfficeHistory
 from src.office.schemas import OfficeCreate, OfficeUpdate
+from src.office.repository import OfficeRepository
 
 class OfficeService:
   """
   Handles business logic for office management, including audit trails and soft deletion.
+  Delegates all database access to the OfficeRepository.
   """
 
   @staticmethod
@@ -20,11 +21,10 @@ class OfficeService:
   ) -> Office:
     """
     Creates a new office and initializes its audit trail.
-    Ensures that office names remain unique.
+    Enforces name uniqueness across the department structure.
     """
-    # Check for name collision to prevent duplicate departments
-    result = await db.execute(select(Office).where(Office.name == office_data.name))
-    if result.scalar_one_or_none():
+    existing_office = await OfficeRepository.get_by_name(db, office_data.name)
+    if existing_office:
       raise DomainException("An office with this name already exists", status_code=400)
 
     new_office = Office(
@@ -32,9 +32,9 @@ class OfficeService:
       description=office_data.description
     )
     
-    db.add(new_office)
-    # Flush pushes the object to the database to generate the UUID, 
-    # but does not commit the transaction yet. Needed for the history entry.
+    OfficeRepository.add(db, new_office)
+    
+    # Flush to secure the UUID for the history record
     await db.flush() 
 
     history_entry = OfficeHistory(
@@ -45,7 +45,8 @@ class OfficeService:
       change_reason="Initial office creation"
     )
     
-    db.add(history_entry)
+    OfficeRepository.add_history(db, history_entry)
+    
     await db.commit()
     await db.refresh(new_office)
     
@@ -59,26 +60,16 @@ class OfficeService:
     include_inactive: bool = False
   ):
     """
-    Retrieves a list of offices.
-    Filters out deactivated offices by default, unless explicitly requested.
+    Retrieves a paginated list of offices.
     """
-    query = select(Office)
-    
-    if not include_inactive:
-      query = query.where(Office.is_active == True)
-      
-    query = query.order_by(Office.name).offset(skip).limit(limit)
-    
-    result = await db.execute(query)
-    return result.scalars().all()
+    return await OfficeRepository.get_all(db, skip, limit, include_inactive)
 
   @staticmethod
   async def get_office_by_id(db: AsyncSession, office_id: uuid.UUID) -> Office:
     """
-    Retrieves a specific office by ID.
+    Retrieves a specific office and ensures its existence.
     """
-    result = await db.execute(select(Office).where(Office.id == office_id))
-    office = result.scalar_one_or_none()
+    office = await OfficeRepository.get_by_id(db, office_id)
     if not office:
       raise DomainException("Office not found", status_code=404)
     return office
@@ -91,24 +82,21 @@ class OfficeService:
     admin_id: uuid.UUID
   ) -> Office:
     """
-    Applies updates to an office and logs the change in the history table.
+    Applies updates to an office and records a history snapshot.
     """
     update_dict = update_data.model_dump(exclude_unset=True)
     
     if not update_dict:
       return office
       
-    # Check for name uniqueness if the name is being updated
     if "name" in update_dict and update_dict["name"] != office.name:
-      result = await db.execute(select(Office).where(Office.name == update_dict["name"]))
-      if result.scalar_one_or_none():
+      existing_office = await OfficeRepository.get_by_name(db, update_dict["name"])
+      if existing_office:
         raise DomainException("An office with this name already exists", status_code=400)
 
-    # Apply updates
     for key, value in update_dict.items():
       setattr(office, key, value)
       
-    # Create an audit trail snapshot
     history_entry = OfficeHistory(
       office_id=office.id,
       name=office.name,
@@ -117,8 +105,9 @@ class OfficeService:
       change_reason="Office details updated via API"
     )
     
-    db.add(office)
-    db.add(history_entry)
+    OfficeRepository.add(db, office)
+    OfficeRepository.add_history(db, history_entry)
+    
     await db.commit()
     await db.refresh(office)
     
@@ -129,9 +118,9 @@ class OfficeService:
     db: AsyncSession, 
     office_id: uuid.UUID, 
     admin_id: uuid.UUID
-  ):
+  ) -> None:
     """
-    Soft-deletes (deactivates) an office.
+    Soft-deletes (deactivates) an office and creates an audit entry.
     """
     office = await OfficeService.get_office_by_id(db, office_id)
     
@@ -149,6 +138,6 @@ class OfficeService:
       change_reason="Office deactivated"
     )
     
-    db.add(office)
-    db.add(history_entry)
+    OfficeRepository.add(db, office)
+    OfficeRepository.add_history(db, history_entry)
     await db.commit()

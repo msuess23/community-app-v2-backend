@@ -19,3 +19,4 @@ PyJWT>=2.8.0                # Tokens
 
 # --- Support ---
 python-dotenv>=1.0.1        # Env Variables
+apscheduler>=3.10.4         # Cron jobs

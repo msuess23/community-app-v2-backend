@@ -3,48 +3,76 @@ import string
 from datetime import datetime, timedelta, timezone
 from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import delete
 
 from src.core.security import get_password_hash, verify_password
 from src.core.email import send_otp_email
 from src.core.exceptions import DomainException
-from src.user.repository import get_user_by_email, create_user
+from src.user.models import User, UserHistory
 from src.auth.models import PasswordReset
 from src.user.schemas import UserCreate
 from src.auth.schemas import ResetPasswordRequest
+from src.user.repository import UserRepository
+from src.auth.repository import AuthRepository
 
 class AuthService:
   """
-  Handles business logic for authentication and account recovery.
+  Handles business logic for authentication, registration, and account recovery.
+  Delegates all database interactions to the respective repositories.
   """
   
   @staticmethod
-  async def register_user(db: AsyncSession, user_data: UserCreate):
-    existing = await get_user_by_email(db, user_data.email)
-    if existing:
+  async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
+    """
+    Validates input, hashes the password, and stages a new user and audit trail 
+    for database insertion.
+    """
+    existing_user = await UserRepository.get_by_email(db, user_data.email)
+    if existing_user:
       raise DomainException("Email already registered", error_code="EMAIL_EXISTS", status_code=400)
     
-    db_user_data = {
-      "email": user_data.email,
-      "hashed_password": get_password_hash(user_data.password),
-      "first_name": user_data.first_name,
-      "last_name": user_data.last_name
-    }
-    return await create_user(db, db_user_data)
+    new_user = User(
+      email=user_data.email,
+      hashed_password=get_password_hash(user_data.password),
+      first_name=user_data.first_name,
+      last_name=user_data.last_name
+    )
+    
+    UserRepository.add(db, new_user)
+    
+    # Flush to generate the new user's UUID for the history entry without committing the transaction
+    await db.flush()
+    
+    history_entry = UserHistory(
+      user_id=new_user.id,
+      email=new_user.email,
+      first_name=new_user.first_name,
+      last_name=new_user.last_name,
+      role=new_user.role,
+      changed_by_user_id=new_user.id,
+      change_reason="Initial Registration"
+    )
+    
+    UserRepository.add_history(db, history_entry)
+    
+    # Complete the unit of work
+    await db.commit()
+    await db.refresh(new_user)
+    
+    return new_user
 
   @staticmethod
-  async def request_password_reset(db: AsyncSession, email: str, background_tasks: BackgroundTasks):
-    user = await get_user_by_email(db, email)
-    
-    # Return immediately to prevent email enumeration
+  async def request_password_reset(db: AsyncSession, email: str, background_tasks: BackgroundTasks) -> None:
+    """
+    Generates a secure OTP for password reset and triggers an email task.
+    Returns silently if the email does not exist to prevent user enumeration.
+    """
+    user = await UserRepository.get_by_email(db, email)
     if not user:
       return
     
-    # Invalidate old OTPs
-    await db.execute(delete(PasswordReset).where(PasswordReset.email == email))
+    # Invalidate previous OTPs for this email
+    await AuthRepository.delete_password_resets_by_email(db, email)
     
-    # Generate and store new OTP
     otp_code = ''.join(secrets.choice(string.digits) for _ in range(6))
     expires = datetime.now(timezone.utc) + timedelta(minutes=15)
     
@@ -53,36 +81,38 @@ class AuthService:
       otp_hash=get_password_hash(otp_code),
       expires_at=expires
     )
-    db.add(reset_record)
+    
+    AuthRepository.add_password_reset(db, reset_record)
     await db.commit()
     
-    # Send email in background
+    # Delegate email sending to background process
     background_tasks.add_task(send_otp_email, email, otp_code)
 
   @staticmethod
-  async def reset_password(db: AsyncSession, data: ResetPasswordRequest):
-    result = await db.execute(select(PasswordReset).where(PasswordReset.email == data.email))
-    reset_record = result.scalar_one_or_none()
+  async def reset_password(db: AsyncSession, data: ResetPasswordRequest) -> None:
+    """
+    Validates the OTP and applies the new password to the user account.
+    """
+    reset_record = await AuthRepository.get_password_reset_by_email(db, data.email)
     
     if not reset_record:
       raise DomainException("Invalid or expired OTP", status_code=400)
       
     if reset_record.expires_at < datetime.now(timezone.utc):
-      await db.execute(delete(PasswordReset).where(PasswordReset.id == reset_record.id))
+      await AuthRepository.delete_password_reset_by_id(db, reset_record.id)
       await db.commit()
       raise DomainException("OTP has expired", status_code=400)
       
     if not verify_password(data.otp, reset_record.otp_hash):
       raise DomainException("Invalid OTP", status_code=400)
     
-    # Update password
-    user = await get_user_by_email(db, data.email)
+    user = await UserRepository.get_by_email(db, data.email)
     if not user:
       raise DomainException("User not found", status_code=404)
       
     user.hashed_password = get_password_hash(data.new_password)
-    db.add(user)
+    UserRepository.add(db, user)
     
-    # Cleanup OTP
-    await db.execute(delete(PasswordReset).where(PasswordReset.id == reset_record.id))
+    # Cleanup used OTP
+    await AuthRepository.delete_password_reset_by_id(db, reset_record.id)
     await db.commit()

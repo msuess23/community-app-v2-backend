@@ -7,7 +7,7 @@ from src.core.config import settings
 from src.core.database import get_db
 from src.core.security import verify_password, create_access_token, create_refresh_token
 from src.core.exceptions import UnauthorizedException
-from src.user.repository import get_user_by_email
+from src.user.repository import get_by_email
 from src.auth.service import AuthService
 from src.auth.models import BlacklistedToken
 from src.user.schemas import UserCreate, UserResponse
@@ -30,7 +30,7 @@ async def login(
   form_data: OAuth2PasswordRequestForm = Depends(),
   db: AsyncSession = Depends(get_db)
 ):
-  user = await get_user_by_email(db, email=form_data.username)
+  user = await get_by_email(db, email=form_data.username)
   if not user or not verify_password(form_data.password, user.hashed_password):
     raise UnauthorizedException("Incorrect email or password")
   
