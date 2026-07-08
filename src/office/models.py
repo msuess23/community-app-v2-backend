@@ -14,7 +14,7 @@ class Office(Base):
   __tablename__ = "offices"
 
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-  name = Column(String, nullable=False, unique=True)
+  name = Column(String, nullable=False)
   description = Column(String, nullable=True)
   contact_email = Column(String, nullable=True)
   phone = Column(String, nullable=True)

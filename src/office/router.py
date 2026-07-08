@@ -29,7 +29,7 @@ async def get_all_offices(
   Publicly accessible.
   """
   return await OfficeService.get_all_offices(
-    db=db, skip=skip, limit=limit, include_inactive=False, search=q, bbox=bbox
+    db=db, skip=skip, limit=limit, include_inactive=include_inactive, search=q, bbox=bbox
   )
 
 

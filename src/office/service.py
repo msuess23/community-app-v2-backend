@@ -182,7 +182,7 @@ class OfficeService:
 
     history_entry = OfficeHistory(
       office_id=office.id,
-      name=f"deleted_{office.id}_{office.name}",
+      name=office.name,
       description=office.description,
       address_snapshot=OfficeService._format_address_snapshot(office.address),
       changed_by_user_id=admin_id,
