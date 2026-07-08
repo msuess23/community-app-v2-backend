@@ -1,10 +1,14 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from src.core.config import settings
 from src.core.exceptions import DomainException, domain_exception_handler
 from src.core.scheduler import setup_scheduler, shutdown_scheduler
+from src.core.limiter import limiter
 
 import src.auth.models
 import src.user.models
@@ -28,7 +32,8 @@ async def lifespan(app: FastAPI):
 # Initialize the FastAPI application
 app = FastAPI(
   title=settings.PROJECT_NAME,
-  openapi_url=f"{settings.BASE_URL}/openapi.json"
+  openapi_url=f"{settings.BASE_URL}/openapi.json",
+  lifespan=lifespan
 )
 
 # Configure CORS (Cross-Origin Resource Sharing)
@@ -41,8 +46,10 @@ app.add_middleware(
   allow_headers=["*"],
 )
 
+app.state.limiter = limiter
 # Register the global domain exception handler
 app.add_exception_handler(DomainException, domain_exception_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # --- Router Registration ---
 app.include_router(

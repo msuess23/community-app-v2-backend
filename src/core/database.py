@@ -6,9 +6,12 @@ from src.core.config import settings
 
 # Create async engine for PostgreSQL
 engine = create_async_engine(
-  settings.DATABASE_URL,
-  echo=False,
-  future=True
+    settings.DATABASE_URL,
+    echo=False,
+    pool_size=10,
+    max_overflow=20,
+    pool_timeout=30,
+    pool_recycle=1800
 )
 
 # Configure session factory

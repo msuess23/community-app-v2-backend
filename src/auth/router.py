@@ -6,6 +6,8 @@ from src.core.config import settings
 from src.core.database import get_db
 from src.core.security import verify_password, create_access_token, create_refresh_token
 from src.core.exceptions import UnauthorizedException
+from src.core.limiter import limiter
+
 from src.user.repository import UserRepository
 from src.auth.service import AuthService
 from src.auth.models import BlacklistedToken
@@ -25,7 +27,9 @@ async def register(
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("5/minute")
 async def login(
+  request: Request,
   form_data: OAuth2PasswordRequestForm = Depends(),
   db: AsyncSession = Depends(get_db)
 ):
@@ -41,6 +45,7 @@ async def login(
 
 
 @router.post("/forgot-password-request")
+@limiter.limit("5/minute")
 async def forgot_password_request(
   request: ForgotPasswordRequest, 
   background_tasks: BackgroundTasks,
@@ -51,6 +56,7 @@ async def forgot_password_request(
   return {"message": "If this email exists, an OTP has been sent."}
 
 @router.post("/reset-password")
+@limiter.limit("5/minute")
 async def reset_password(
   request: ResetPasswordRequest,
   db: AsyncSession = Depends(get_db)
