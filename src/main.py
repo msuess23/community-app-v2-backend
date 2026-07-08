@@ -1,15 +1,29 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.core.config import settings
 from src.core.exceptions import DomainException, domain_exception_handler
+from src.core.scheduler import setup_scheduler, shutdown_scheduler
 
+import src.auth.models
 import src.user.models
 import src.office.models
-import src.auth.models
 
 from src.auth.router import router as auth_router
 from src.user.router import router as user_router
+from src.office.router import router as office_router
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+  """
+  Manages the application lifecycle, including background tasks.
+  """
+  setup_scheduler()
+  
+  yield 
+  
+  shutdown_scheduler()
 
 # Initialize the FastAPI application
 app = FastAPI(
@@ -41,6 +55,12 @@ app.include_router(
   user_router,
   prefix=f"{settings.BASE_URL}/users",
   tags=["Users"]
+)
+
+app.include_router(
+  office_router,
+  prefix=f"{settings.BASE_URL}/offices",
+  tags=["Offices"]
 )
 
 @app.get("/")

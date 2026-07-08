@@ -26,6 +26,7 @@ class User(Base):
   office_id = Column(UUID(as_uuid=True), ForeignKey("offices.id"), nullable=True)
   is_active = Column(Boolean, default=True)
   created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+  deactivated_at = Column(DateTime(timezone=True), nullable=True)
 
   # Relationship to history (for audit trail)
   history = relationship("UserHistory", back_populates="user")
