@@ -66,11 +66,9 @@ async def logout(
   token: str = Depends(oauth2_scheme),
   db: AsyncSession = Depends(get_db)
 ):
-  """Invalidates the current access token (and optionally the refresh token)."""
-  db.add(BlacklistedToken(token=token))
-  
-  if refresh_token:
-    db.add(BlacklistedToken(token=refresh_token))
-    
-  await db.commit()
+  """
+  Invalidates the current access token (and optionally the refresh token).
+  Safe to call multiple times with the same token.
+  """
+  await AuthService.logout(db, access_token=token, refresh_token=refresh_token)
   return {"message": "Successfully logged out."}

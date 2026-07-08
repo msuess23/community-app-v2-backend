@@ -32,25 +32,30 @@ class UserRepository:
     office_id: Optional[uuid.UUID] = None,
     role: Optional[Role] = None,
     exclude_citizens: bool = False,
-    force_office_id: Optional[uuid.UUID] = None
+    force_office_id: Optional[uuid.UUID] = None,
+    include_inactive: bool = False
   ) -> List[User]:
     """
     Retrieves users with dynamic filtering.
     Applies security policies provided by the service layer (isolation and data minimization).
     """
     query = select(User)
+
+    # 1. Filter inactive users
+    if not include_inactive:
+      query = query.where(User.is_active == True)
     
-    # 1. Apply requested filters
+    # 2. Apply requested filters
     if office_id:
       query = query.where(User.office_id == office_id)
     if role:
       query = query.where(User.role == role)
       
-    # 2. Apply Data Minimization constraints
+    # 3. Apply role filter
     if exclude_citizens:
       query = query.where(User.role != Role.CITIZEN)
       
-    # 3. Apply Tenant Isolation constraints
+    # 4. Apply Tenant Isolation constraints
     if force_office_id:
       query = query.where(User.office_id == force_office_id)
       
@@ -86,10 +91,10 @@ class UserRepository:
     
     stmt = update(UserHistory).where(
       UserHistory.user_id.in_(subquery),
-      UserHistory.email != "deleted@anonymized.local"
+      UserHistory.email != "deleted@local.com"
     ).values(
-      first_name="Anonymized",
-      last_name="User",
-      email="deleted@anonymized.local"
+      first_name="gelöschter",
+      last_name="Nutzer",
+      email="deleted@local.com"
     )
     await db.execute(stmt)

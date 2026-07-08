@@ -31,6 +31,7 @@ async def update_my_profile(
 async def get_all_users(
   office_id: Optional[uuid.UUID] = None,
   role: Optional[Role] = None,
+  include_inactive: bool = False,
   skip: int = 0, 
   limit: int = 100,
   db: AsyncSession = Depends(get_db),
@@ -40,7 +41,7 @@ async def get_all_users(
   Returns a list of users.
   Enforces role-based isolation and data minimization under the hood.
   """
-  return await UserService.get_all_users(db, current_user, skip, limit, office_id, role)
+  return await UserService.get_all_users(db, current_user, skip, limit, office_id, role, include_inactive)
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(

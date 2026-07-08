@@ -25,6 +25,9 @@ class UserService:
     Applies updates to a user profile and logs the change in the history table.
     Accepts different update schemas based on the requester's role.
     """
+    if getattr(user, "is_active", True) is False:
+      raise DomainException("Cannot update a deactivated user profile.", status_code=400)
+
     update_dict = update_data.model_dump(exclude_unset=True)
     
     if not update_dict:
@@ -57,7 +60,8 @@ class UserService:
     skip: int = 0, 
     limit: int = 100,
     office_id: Optional[uuid.UUID] = None,
-    role: Optional[Role] = None
+    role: Optional[Role] = None,
+    include_inactive: bool = False
   ):
     """
     Retrieves users while enforcing strict data minimization and isolation rules.
@@ -69,7 +73,7 @@ class UserService:
     force_office_id = current_user.office_id if current_user.role == Role.OFFICER else None
     
     return await UserRepository.get_all(
-      db, skip, limit, office_id, role, exclude_citizens, force_office_id
+      db, skip, limit, office_id, role, exclude_citizens, force_office_id, include_inactive
     )
 
   @staticmethod
@@ -93,9 +97,9 @@ class UserService:
       
     user.is_active = False
     user.deactivated_at = datetime.now(timezone.utc)
-    user.email = f"deleted_{user.id}@anonymized.local"
-    user.first_name = "Anonymized"
-    user.last_name = "User"
+    user.email = f"deleted@local.com"
+    user.first_name = "gelöschter"
+    user.last_name = "Nutzer"
     user.hashed_password = "UNUSABLE_PASSWORD"
     
     history_entry = UserHistory(

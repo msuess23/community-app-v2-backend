@@ -1,5 +1,6 @@
 import secrets
 import string
+from typing import Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,4 +116,23 @@ class AuthService:
     
     # Cleanup used OTP
     await AuthRepository.delete_password_reset_by_id(db, reset_record.id)
+    await db.commit()
+
+  @staticmethod
+  async def logout(db: AsyncSession, access_token: str, refresh_token: Optional[str] = None) -> None:
+    """
+    Invalidates tokens by adding them to the blacklist.
+    Silently ignores tokens that are already blacklisted.
+    """
+    # Check and blacklist access token
+    is_access_blacklisted = await AuthRepository.is_token_blacklisted(db, access_token)
+    if not is_access_blacklisted:
+      AuthRepository.add_blacklisted_token(db, BlacklistedToken(token=access_token))
+    
+    # Check and blacklist refresh token if provided
+    if refresh_token:
+      is_refresh_blacklisted = await AuthRepository.is_token_blacklisted(db, refresh_token)
+      if not is_refresh_blacklisted:
+        AuthRepository.add_blacklisted_token(db, BlacklistedToken(token=refresh_token))
+        
     await db.commit()
