@@ -33,8 +33,6 @@ class OfficeService:
     )
     
     OfficeRepository.add(db, new_office)
-    
-    # Flush to secure the UUID for the history record
     await db.flush() 
 
     history_entry = OfficeHistory(
@@ -84,6 +82,9 @@ class OfficeService:
     """
     Applies updates to an office and records a history snapshot.
     """
+    if not office.is_active:
+      raise DomainException("Cannot update a deactivated office.", status_code=400)
+
     update_dict = update_data.model_dump(exclude_unset=True)
     
     if not update_dict:
@@ -129,10 +130,10 @@ class OfficeService:
       
     office.is_active = False
     office.deactivated_at = datetime.now(timezone.utc)
-    
+
     history_entry = OfficeHistory(
       office_id=office.id,
-      name=office.name,
+      name=f"deleted_{office.id}_{office.name}",
       description=office.description,
       changed_by_user_id=admin_id,
       change_reason="Office deactivated"

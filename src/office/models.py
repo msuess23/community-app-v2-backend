@@ -17,6 +17,7 @@ class Office(Base):
   description = Column(String, nullable=True)
   is_active = Column(Boolean, default=True)
   created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+  deactivated_at = Column(DateTime(timezone=True), nullable=True)
 
 class OfficeHistory(Base):
   """
