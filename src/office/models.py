@@ -1,6 +1,6 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, ARRAY
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
@@ -16,11 +16,16 @@ class Office(Base):
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
   name = Column(String, nullable=False, unique=True)
   description = Column(String, nullable=True)
+  contact_email = Column(String, nullable=True)
+  phone = Column(String, nullable=True)
+  services = Column(ARRAY(String), default=list)
+  opening_hours = Column(JSONB, default=dict)
   is_active = Column(Boolean, default=True)
   created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
   address_id = Column(UUID(as_uuid=True), ForeignKey("addresses.id"), nullable=True)
   address = relationship("Address", backref="offices")
+
 
 class OfficeHistory(Base):
   """
@@ -33,6 +38,10 @@ class OfficeHistory(Base):
   
   name = Column(String)
   description = Column(String, nullable=True)
+  contact_email = Column(String, nullable=True)
+  phone = Column(String, nullable=True)
+  services = Column(ARRAY(String), default=list)
+  opening_hours = Column(JSONB, default=dict)
   address_snapshot = Column(String, nullable=True)
   changed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
   changed_by_user_id = Column(UUID(as_uuid=True))

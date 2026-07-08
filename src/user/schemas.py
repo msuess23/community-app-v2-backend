@@ -4,6 +4,7 @@ from uuid import UUID
 from datetime import datetime
 
 from src.user.models import Role
+from src.core.schemas import BaseMetadataResponse
 
 class UserCreate(BaseModel):
   email: EmailStr
@@ -11,16 +12,13 @@ class UserCreate(BaseModel):
   first_name: str = Field(..., min_length=2)
   last_name: str = Field(..., min_length=2)
 
-class UserResponse(BaseModel):
+class UserResponse(BaseMetadataResponse):
   id: UUID
   email: EmailStr
   first_name: str
   last_name: str
   role: Role
   office_id: Optional[UUID] = None
-  is_active: bool
-  created_at: datetime
-  deactivated_at: Optional[datetime] = None
   
   model_config = ConfigDict(from_attributes=True)
 

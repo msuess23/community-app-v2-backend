@@ -74,8 +74,12 @@ class OfficeService:
       await db.flush()
 
     new_office = Office(
-      name=office_data.name,
+      name=office_data.name, 
       description=office_data.description,
+      contact_email=office_data.contact_email,
+      phone=office_data.phone,
+      services=office_data.services,
+      opening_hours=office_data.opening_hours.model_dump(exclude_unset=True) if office_data.opening_hours else {},
       address_id=address_entity.id if address_entity else None
     )
     
@@ -86,6 +90,10 @@ class OfficeService:
       office_id=new_office.id,
       name=new_office.name,
       description=new_office.description,
+      contact_email=new_office.contact_email,
+      phone=new_office.phone, 
+      services=new_office.services,
+      opening_hours=new_office.opening_hours,
       address_snapshot=OfficeService._format_address_snapshot(address_entity),
       changed_by_user_id=admin_id,
       change_reason="Initial office creation"
@@ -138,6 +146,10 @@ class OfficeService:
       office_id=office.id,
       name=office.name,
       description=office.description,
+      contact_email=office.contact_email,
+      phone=office.phone,
+      services=office.services,
+      opening_hours=office.opening_hours,
       address_snapshot=OfficeService._format_address_snapshot(office.address),
       changed_by_user_id=admin_id,
       change_reason="Office details updated via API"
