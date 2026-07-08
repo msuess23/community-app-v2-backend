@@ -3,6 +3,8 @@ from typing import Optional
 from uuid import UUID
 from datetime import datetime
 
+from src.address.schemas import AddressCreate, AddressUpdate, AddressResponse
+
 class OfficeCreate(BaseModel):
   """
   Schema for creating a new office.
@@ -18,6 +20,7 @@ class OfficeUpdate(BaseModel):
   """
   name: Optional[str] = Field(None, min_length=3, max_length=150)
   description: Optional[str] = Field(None, max_length=500)
+  address: Optional[AddressCreate] = None
 
 class OfficeResponse(BaseModel):
   """
@@ -29,5 +32,5 @@ class OfficeResponse(BaseModel):
   is_active: bool
   created_at: datetime
   deactivated_at: Optional[datetime] = None
-  
+  address: Optional[AddressResponse] = None
   model_config = ConfigDict(from_attributes=True)

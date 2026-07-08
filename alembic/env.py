@@ -14,6 +14,7 @@ from src.core.config import settings
 from src.user.models import User, UserHistory
 from src.office.models import Office, OfficeHistory
 from src.auth.models import PasswordReset, BlacklistedToken
+from src.address.models import Address
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

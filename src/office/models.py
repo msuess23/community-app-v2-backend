@@ -1,6 +1,7 @@
 import uuid
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
 from src.core.database import Base
@@ -18,6 +19,8 @@ class Office(Base):
   is_active = Column(Boolean, default=True)
   created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
+  address_id = Column(UUID(as_uuid=True), ForeignKey("addresses.id"), nullable=True)
+  address = relationship("Address", backref="offices")
 
 class OfficeHistory(Base):
   """
@@ -30,6 +33,7 @@ class OfficeHistory(Base):
   
   name = Column(String)
   description = Column(String, nullable=True)
+  address_snapshot = Column(String, nullable=True)
   changed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
   changed_by_user_id = Column(UUID(as_uuid=True))
   change_reason = Column(String, nullable=False)
