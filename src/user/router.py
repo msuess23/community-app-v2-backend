@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 import uuid
@@ -6,8 +6,9 @@ import uuid
 from src.core.database import get_db
 from src.auth.dependencies import get_current_user, role_required, get_target_user_if_allowed
 from src.user.models import User, Role
-from src.user.schemas import UserResponse, UserUpdate, AdminUserUpdate
+from src.user.schemas import UserResponse, UserUpdate, AdminUserUpdate, UserHistoryResponse
 from src.user.service import UserService
+from src.core.filters import LifecycleStatusFilter
 
 router = APIRouter()
 
@@ -29,9 +30,10 @@ async def update_my_profile(
 
 @router.get("", response_model=List[UserResponse])
 async def get_all_users(
+  q: Optional[str] = Query(None, description="Search term for email, first name or last name"),
   office_id: Optional[uuid.UUID] = None,
   role: Optional[Role] = None,
-  include_inactive: bool = False,
+  status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
   skip: int = 0, 
   limit: int = 100,
   db: AsyncSession = Depends(get_db),
@@ -41,7 +43,7 @@ async def get_all_users(
   Returns a list of users.
   Enforces role-based isolation and data minimization under the hood.
   """
-  return await UserService.get_all_users(db, current_user, skip, limit, office_id, role, include_inactive)
+  return await UserService.get_all_users(db, current_user, skip, limit, office_id, role, status, q)
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
@@ -77,3 +79,16 @@ async def deactivate_user(
   Soft-deletes (deactivates) a user and scrubs their live data.
   """
   await UserService.deactivate_user(db, user_id, current_user.id)
+
+
+@router.get("/{user_id}/history", response_model=List[UserHistoryResponse])
+async def get_user_history(
+  user_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(role_required(["ADMIN"]))
+):
+  """
+  Retrieves the audit trail/history for a specific user profile.
+  Strictly restricted to administrators.
+  """
+  return await UserService.get_user_history(db, user_id)

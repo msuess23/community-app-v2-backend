@@ -1,6 +1,7 @@
+from enum import Enum
 from typing import Optional, Tuple
 from fastapi import Query, HTTPException
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.sql import Select
 
 # --- 1. FastAPI Route Dependencies ---
@@ -54,3 +55,22 @@ def apply_search_filter(query: Select, search_term: Optional[str], *columns) -> 
         
     term = f"%{search_term}%"
     return query.where(or_(*[col.ilike(term) for col in columns]))
+
+
+# --- Active/Inactive Filter for Users and Offices ---
+
+class LifecycleStatusFilter(str, Enum):
+    ALL = "all"
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
+def apply_lifecycle_filter(query, model, status: LifecycleStatusFilter):
+    """
+    Helper function to filter based on is_active flag.
+    Used for User and Office.
+    """
+    if status == LifecycleStatusFilter.ACTIVE:
+        return query.where(model.is_active == True)
+    elif status == LifecycleStatusFilter.INACTIVE:
+        return query.where(model.is_active == False)
+    return query

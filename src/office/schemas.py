@@ -58,3 +58,19 @@ class OfficeResponse(BaseMetadataResponse):
   opening_hours: Optional[OpeningHours] = None
   address: Optional[AddressResponse] = None
   model_config = ConfigDict(from_attributes=True)
+
+
+class OfficeHistoryResponse(BaseModel):
+  id: UUID
+  office_id: UUID
+  name: str
+  description: Optional[str] = None
+  contact_email: Optional[str] = None
+  phone: Optional[str] = None
+  services: list[str] = []
+  opening_hours: dict = {}
+  address_snapshot: Optional[str] = None
+  changed_by_user_id: UUID
+  change_reason: str
+  changed_at: datetime
+  model_config = ConfigDict(from_attributes=True)

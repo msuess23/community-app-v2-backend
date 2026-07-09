@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from src.office.models import Office, OfficeHistory
 from src.address.models import Address
-from src.core.filters import apply_bbox_filter, apply_search_filter
+from src.core.filters import apply_bbox_filter, apply_search_filter, apply_lifecycle_filter, LifecycleStatusFilter
 
 class OfficeRepository:
   """
@@ -34,7 +34,7 @@ class OfficeRepository:
     db: AsyncSession,
     skip: int = 0,
     limit: int = 100,
-    include_inactive: bool = False,
+    status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
     search: Optional[str] = None,
     bbox: Optional[Tuple[float, float, float, float]] = None
   ) -> List[Office]:
@@ -42,9 +42,8 @@ class OfficeRepository:
     Retrieves a list of offices with optional spatial bounding box and text search.
     """
     query = select(Office).options(selectinload(Office.address))
-    if not include_inactive:
-      query = query.where(Office.is_active == True)
-
+    
+    query = apply_lifecycle_filter(query, Office, status)
     query = apply_search_filter(query, search, Office.name, Office.description)
 
     if bbox:
@@ -64,3 +63,15 @@ class OfficeRepository:
   @staticmethod
   def add_history(db: AsyncSession, history_entry: OfficeHistory) -> None:
     db.add(history_entry)
+
+
+  @staticmethod
+  async def get_history_by_office_id(db: AsyncSession, office_id: uuid.UUID) -> List[OfficeHistory]:
+    """Retrieves the audit trail for a specific office, newest first."""
+    query = (
+      select(OfficeHistory)
+      .where(OfficeHistory.office_id == office_id)
+      .order_by(OfficeHistory.changed_at.desc())
+    )
+    result = await db.execute(query)
+    return result.scalars().all()

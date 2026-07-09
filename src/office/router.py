@@ -6,9 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.auth.dependencies import role_required, get_current_user
 from src.user.models import User
-from src.office.schemas import OfficeCreate, OfficeUpdate, OfficeResponse
+from src.office.schemas import OfficeCreate, OfficeUpdate, OfficeResponse, OfficeHistoryResponse
 from src.office.service import OfficeService
-from src.core.filters import get_bbox_filter
+from src.core.filters import get_bbox_filter, LifecycleStatusFilter
 
 router = APIRouter()
 
@@ -21,7 +21,7 @@ async def get_all_offices(
   bbox: Optional[Tuple[float, float, float, float]] = Depends(get_bbox_filter),
   skip: int = 0,
   limit: int = 100,
-  include_inactive: bool = False,
+  status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
   db: AsyncSession = Depends(get_db),
 ):
   """
@@ -29,7 +29,7 @@ async def get_all_offices(
   Publicly accessible.
   """
   return await OfficeService.get_all_offices(
-    db=db, skip=skip, limit=limit, include_inactive=include_inactive, search=q, bbox=bbox
+    db=db, skip=skip, limit=limit, status=status, search=q, bbox=bbox
   )
 
 
@@ -89,3 +89,16 @@ async def deactivate_office(
   Strictly restricted to administrators.
   """
   await OfficeService.deactivate_office(db, office_id, current_user.id)
+
+
+@router.get("/{office_id}/history", response_model=List[OfficeHistoryResponse])
+async def get_office_history(
+  office_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(role_required(["ADMIN"]))
+):
+  """
+  Retrieves the audit trail/history for a specific office.
+  Strictly restricted to administrators.
+  """
+  return await OfficeService.get_office_history(db, office_id)

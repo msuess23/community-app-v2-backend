@@ -5,6 +5,7 @@ from sqlalchemy.future import select
 from sqlalchemy import update
 
 from src.user.models import User, UserHistory, Role
+from src.core.filters import LifecycleStatusFilter, apply_lifecycle_filter, apply_search_filter
 
 class UserRepository:
   """
@@ -33,7 +34,8 @@ class UserRepository:
     role: Optional[Role] = None,
     exclude_citizens: bool = False,
     force_office_id: Optional[uuid.UUID] = None,
-    include_inactive: bool = False
+    status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
+    search: Optional[str] = None
   ) -> List[User]:
     """
     Retrieves users with dynamic filtering.
@@ -41,21 +43,23 @@ class UserRepository:
     """
     query = select(User)
 
-    # 1. Filter inactive users
-    if not include_inactive:
-      query = query.where(User.is_active == True)
+    # Lifecycle filter
+    query = apply_lifecycle_filter(query, User, status)
+
+    # Text Search
+    query = apply_search_filter(query, search, User.email, User.first_name, User.last_name)
     
-    # 2. Apply requested filters
+    # Office & Role Filter
     if office_id:
       query = query.where(User.office_id == office_id)
     if role:
       query = query.where(User.role == role)
       
-    # 3. Apply role filter
+    # Filter out citizens
     if exclude_citizens:
       query = query.where(User.role != Role.CITIZEN)
       
-    # 4. Apply Tenant Isolation constraints
+    # Apply Tenant Isolation constraints
     if force_office_id:
       query = query.where(User.office_id == force_office_id)
       
@@ -98,3 +102,15 @@ class UserRepository:
       email="deleted@local.com"
     )
     await db.execute(stmt)
+
+
+  @staticmethod
+  async def get_history_by_user_id(db: AsyncSession, user_id: uuid.UUID) -> List[UserHistory]:
+    """Retrieves the audit trail for a specific user, newest first."""
+    query = (
+      select(UserHistory)
+      .where(UserHistory.user_id == user_id)
+      .order_by(UserHistory.changed_at.desc())
+    )
+    result = await db.execute(query)
+    return result.scalars().all()

@@ -8,6 +8,7 @@ from src.office.models import Office, OfficeHistory
 from src.office.schemas import OfficeCreate, OfficeUpdate
 from src.office.repository import OfficeRepository
 from src.address.service import AddressService
+from src.core.filters import LifecycleStatusFilter
 
 class OfficeService:
   """
@@ -30,7 +31,7 @@ class OfficeService:
     db: AsyncSession, 
     skip: int = 0, 
     limit: int = 100,
-    include_inactive: bool = False,
+    status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
     search: Optional[str] = None,
     bbox: Optional[Tuple[float, float, float, float]] = None
   ):
@@ -38,7 +39,7 @@ class OfficeService:
     Retrieves a paginated list of offices.
     """
     return await OfficeRepository.get_all(
-      db, skip, limit, include_inactive, search, bbox
+      db, skip, limit, status, search, bbox
     )
 
   @staticmethod
@@ -187,3 +188,13 @@ class OfficeService:
     OfficeRepository.add(db, office)
     OfficeRepository.add_history(db, history_entry)
     await db.commit()
+
+
+  @staticmethod
+  async def get_office_history(db: AsyncSession, office_id: uuid.UUID) -> list[OfficeHistory]:
+    """
+    Retrieves the audit trail of an office.
+    Ensures the office actually exists before returning history.
+    """
+    await OfficeService.get_office_by_id(db, office_id)
+    return await OfficeRepository.get_history_by_office_id(db, office_id)

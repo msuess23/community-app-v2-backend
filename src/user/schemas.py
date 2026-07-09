@@ -36,3 +36,16 @@ class AdminUserUpdate(UserUpdate):
   """
   role: Optional[Role] = None
   office_id: Optional[UUID] = None
+
+
+class UserHistoryResponse(BaseModel):
+  id: UUID
+  user_id: UUID
+  email: str
+  first_name: str
+  last_name: str
+  role: Role
+  changed_by_user_id: UUID
+  change_reason: str
+  changed_at: datetime
+  model_config = ConfigDict(from_attributes=True)

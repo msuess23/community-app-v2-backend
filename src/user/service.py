@@ -6,6 +6,7 @@ from typing import Optional, Union
 from src.user.models import User, UserHistory, Role
 from src.user.schemas import UserUpdate, AdminUserUpdate
 from src.core.exceptions import DomainException
+from src.core.filters import LifecycleStatusFilter
 from src.user.repository import UserRepository
 
 class UserService:
@@ -61,7 +62,8 @@ class UserService:
     limit: int = 100,
     office_id: Optional[uuid.UUID] = None,
     role: Optional[Role] = None,
-    include_inactive: bool = False
+    status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
+    search: Optional[str] = None
   ):
     """
     Retrieves users while enforcing strict data minimization and isolation rules.
@@ -73,7 +75,7 @@ class UserService:
     force_office_id = current_user.office_id if current_user.role == Role.OFFICER else None
     
     return await UserRepository.get_all(
-      db, skip, limit, office_id, role, exclude_citizens, force_office_id, include_inactive
+      db, skip, limit, office_id, role, exclude_citizens, force_office_id, status, search
     )
 
   @staticmethod
@@ -131,3 +133,13 @@ class UserService:
     
     await db.commit()
     print(f"[{now.isoformat()}] Cron task: Deep anonymization completed successfully.")
+
+
+  @staticmethod
+  async def get_user_history(db: AsyncSession, user_id: uuid.UUID) -> list[UserHistory]:
+    """
+    Retrieves the audit trail of a user profile.
+    Ensures the user actually exists before returning history.
+    """
+    await UserService.get_user_by_id(db, user_id)
+    return await UserRepository.get_history_by_user_id(db, user_id)
