@@ -62,12 +62,7 @@ class OfficeService:
   ) -> Office:
     """
     Creates a new office and initializes its audit trail.
-    Enforces name uniqueness across the department structure.
     """
-    existing_office = await OfficeRepository.get_by_name(db, office_data.name)
-    if existing_office:
-      raise DomainException("An office with this name already exists", status_code=400)
-
     address_entity = None
     if office_data.address:
       address_entity = AddressService.create_address_entity(office_data.address)
