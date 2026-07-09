@@ -136,10 +136,15 @@ class UserService:
 
 
   @staticmethod
-  async def get_user_history(db: AsyncSession, user_id: uuid.UUID) -> list[UserHistory]:
+  async def get_user_history(
+    db: AsyncSession, 
+    user_id: uuid.UUID,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None
+  ) -> list[UserHistory]:
     """
     Retrieves the audit trail of a user profile.
     Ensures the user actually exists before returning history.
     """
     await UserService.get_user_by_id(db, user_id)
-    return await UserRepository.get_history_by_user_id(db, user_id)
+    return await UserRepository.get_history_by_user_id(db, user_id, start_date, end_date)

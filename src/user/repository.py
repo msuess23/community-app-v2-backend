@@ -3,6 +3,7 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update
+from datetime import datetime
 
 from src.user.models import User, UserHistory, Role
 from src.core.filters import LifecycleStatusFilter, apply_lifecycle_filter, apply_search_filter
@@ -104,13 +105,42 @@ class UserRepository:
     await db.execute(stmt)
 
 
-  @staticmethod
-  async def get_history_by_user_id(db: AsyncSession, user_id: uuid.UUID) -> List[UserHistory]:
-    """Retrieves the audit trail for a specific user, newest first."""
-    query = (
-      select(UserHistory)
-      .where(UserHistory.user_id == user_id)
-      .order_by(UserHistory.changed_at.desc())
-    )
-    result = await db.execute(query)
-    return result.scalars().all()
+    @staticmethod
+    async def get_history_by_user_id(
+    db: AsyncSession, 
+    user_id: uuid.UUID,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None
+    ) -> List[UserHistory]:
+      """Retrieves the audit trail for a specific user, newest first."""
+      records = []
+
+      # Get last change that was made before the start_date as 
+      # it would still be active during part of the time frame
+      if start_date:
+        query_before = (
+          select(UserHistory)
+          .where(UserHistory.user_id == user_id, UserHistory.changed_at < start_date)
+          .order_by(UserHistory.changed_at.desc())
+          .limit(1)
+        )
+        result_before = await db.execute(query_before)
+        before_record = result_before.scalar_one_or_none()
+        if before_record:
+          records.append(before_record)
+
+      # Get all changes within the time frame
+      query_range = select(UserHistory).where(UserHistory.user_id == user_id)
+
+      if start_date:
+        query_range = query_range.where(UserHistory.changed_at >= start_date)
+      if end_date:
+        query_range = query_range.where(UserHistory.changed_at <= end_date)
+
+      query_range = query_range.order_by(UserHistory.changed_at.desc())
+
+      result_range = await db.execute(query_range)
+      range_records = list(result_range.scalars().all())
+
+      # Combine both
+      return range_records + records

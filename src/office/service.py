@@ -191,10 +191,15 @@ class OfficeService:
 
 
   @staticmethod
-  async def get_office_history(db: AsyncSession, office_id: uuid.UUID) -> list[OfficeHistory]:
+  async def get_office_history(
+    db: AsyncSession, 
+    office_id: uuid.UUID,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None
+  ) -> list[OfficeHistory]:
     """
     Retrieves the audit trail of an office.
     Ensures the office actually exists before returning history.
     """
     await OfficeService.get_office_by_id(db, office_id)
-    return await OfficeRepository.get_history_by_office_id(db, office_id)
+    return await OfficeRepository.get_history_by_office_id(db, office_id, start_date, end_date)

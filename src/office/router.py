@@ -2,6 +2,7 @@ import uuid
 from typing import List, Optional, Tuple
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
 
 from src.core.database import get_db
 from src.auth.dependencies import role_required, get_current_user
@@ -94,6 +95,8 @@ async def deactivate_office(
 @router.get("/{office_id}/history", response_model=List[OfficeHistoryResponse])
 async def get_office_history(
   office_id: uuid.UUID,
+  start_date: Optional[datetime] = Query(None, description="Start of the validity period"),
+  end_date: Optional[datetime] = Query(None, description="End of the validity period"),
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(role_required(["ADMIN"]))
 ):
@@ -101,4 +104,4 @@ async def get_office_history(
   Retrieves the audit trail/history for a specific office.
   Strictly restricted to administrators.
   """
-  return await OfficeService.get_office_history(db, office_id)
+  return await OfficeService.get_office_history(db, office_id, start_date, end_date)

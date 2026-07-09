@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
+from datetime import datetime
 
 from src.office.models import Office, OfficeHistory
 from src.address.models import Address
@@ -66,12 +67,41 @@ class OfficeRepository:
 
 
   @staticmethod
-  async def get_history_by_office_id(db: AsyncSession, office_id: uuid.UUID) -> List[OfficeHistory]:
+  async def get_history_by_office_id(
+    db: AsyncSession, 
+    office_id: uuid.UUID,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None
+    ) -> List[OfficeHistory]:
     """Retrieves the audit trail for a specific office, newest first."""
-    query = (
-      select(OfficeHistory)
-      .where(OfficeHistory.office_id == office_id)
-      .order_by(OfficeHistory.changed_at.desc())
-    )
-    result = await db.execute(query)
-    return result.scalars().all()
+    records = []
+
+    # Get last change that was made before the start_date as 
+    # it would still be active during part of the time frame
+    if start_date:
+      query_before = (
+        select(OfficeHistory)
+        .where(OfficeHistory.office_id == office_id, OfficeHistory.changed_at < start_date)
+        .order_by(OfficeHistory.changed_at.desc())
+        .limit(1)
+      )
+      result_before = await db.execute(query_before)
+      before_record = result_before.scalar_one_or_none()
+      if before_record:
+        records.append(before_record)
+
+    # Get all changes within the time frame
+    query_range = select(OfficeHistory).where(OfficeHistory.office_id == office_id)
+
+    if start_date:
+      query_range = query_range.where(OfficeHistory.changed_at >= start_date)
+    if end_date:
+      query_range = query_range.where(OfficeHistory.changed_at <= end_date)
+
+    query_range = query_range.order_by(OfficeHistory.changed_at.desc())
+
+    result_range = await db.execute(query_range)
+    range_records = list(result_range.scalars().all())
+
+    # Combine both
+    return range_records + records

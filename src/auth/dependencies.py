@@ -68,11 +68,11 @@ async def get_target_user_if_allowed(
   if current_user.id == user_id:
     return current_user
     
-  # Case B: User is requesting someone else's data, but lacks permissions
+  # Case B: User is Citizen and is requesting someone else's data
   if current_user.role == "CITIZEN":
     raise UnauthorizedException("You do not have permission to access this resource.")
     
-  # Case C: User is Admin/Manager. Load the target profile from the database.
+  # Case C: User is Public Servant. Load the target profile from the database.
   # Lazy import to avoid circular dependency issues during startup.
   from src.user.service import UserService 
   target_user = await UserService.get_user_by_id(db, user_id)
