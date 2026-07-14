@@ -308,19 +308,23 @@ class UserService:
     cutoff_citizen = now - timedelta(days=180)
     cutoff_officer = now - timedelta(days=3650)
 
-    await UserRepository.bulk_anonymize_history(
+    citizen_rows = await UserPersistence.bulk_anonymize_history(
       db,
       [Role.CITIZEN],
       cutoff_citizen,
     )
-    await UserRepository.bulk_anonymize_history(
+    staff_rows = await UserPersistence.bulk_anonymize_history(
       db,
       [Role.DISPATCHER, Role.OFFICER, Role.MANAGER, Role.ADMIN],
       cutoff_officer,
     )
     logger.info(
       "Deep anonymization completed",
-      extra={"completed_at": now.isoformat()},
+      extra={
+        "completed_at": now.isoformat(),
+        "citizen_history_rows": citizen_rows,
+        "staff_history_rows": staff_rows,
+      },
     )
 
   @staticmethod

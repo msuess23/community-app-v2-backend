@@ -1,7 +1,7 @@
 """Add auth tables
 
 Revision ID: fb9160d80f47
-Revises: 81bea0e1c42c
+Revises: fdb0684b596d
 Create Date: 2026-07-08 04:58:40.234575
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'fb9160d80f47'
-down_revision: Union[str, Sequence[str], None] = '81bea0e1c42c'
+down_revision: Union[str, Sequence[str], None] = 'fdb0684b596d'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

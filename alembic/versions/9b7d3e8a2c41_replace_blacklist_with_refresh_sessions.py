@@ -50,14 +50,16 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["replaced_by_id"],
             ["refresh_sessions.id"],
+            name="fk_refresh_sessions_replaced_by_id_refresh_sessions",
             ondelete="SET NULL",
         ),
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["users.id"],
+            name="fk_refresh_sessions_user_id_users",
             ondelete="CASCADE",
         ),
-        sa.PrimaryKeyConstraint("id"),
+        sa.PrimaryKeyConstraint("id", name="pk_refresh_sessions"),
     )
     op.create_index(
         op.f("ix_refresh_sessions_expires_at"),
@@ -109,7 +111,7 @@ def downgrade() -> None:
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("token", sa.String(), nullable=False),
         sa.Column("blacklisted_on", sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
+        sa.PrimaryKeyConstraint("id", name="pk_blacklisted_tokens"),
     )
     op.create_index(
         op.f("ix_blacklisted_tokens_token"),

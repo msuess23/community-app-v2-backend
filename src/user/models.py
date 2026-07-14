@@ -50,6 +50,7 @@ class User(Base):
     DateTime(timezone=True),
     nullable=False,
     default=lambda: datetime.now(timezone.utc),
+    server_default=func.now(),
   )
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -64,6 +65,23 @@ class User(Base):
     CheckConstraint(
       "btrim(first_name) <> ''",
       name="ck_users_first_name_not_blank",
+    ),
+    CheckConstraint(
+      "email = lower(btrim(email)) AND email <> ''",
+      name="ck_users_email_canonical",
+    ),
+    CheckConstraint(
+      "btrim(hashed_password) <> ''",
+      name="ck_users_hashed_password_not_blank",
+    ),
+    CheckConstraint(
+      "auth_version >= 0",
+      name="ck_users_auth_version_nonnegative",
+    ),
+    CheckConstraint(
+      "(is_active IS TRUE AND deactivated_at IS NULL) OR "
+      "(is_active IS FALSE AND deactivated_at IS NOT NULL)",
+      name="ck_users_deactivation_state",
     ),
     CheckConstraint(
       "btrim(last_name) <> ''",
@@ -108,6 +126,7 @@ class UserHistory(Base):
     DateTime(timezone=True),
     nullable=False,
     default=lambda: datetime.now(timezone.utc),
+    server_default=func.now(),
   )
   valid_to = Column(DateTime(timezone=True), nullable=True)
   changed_by_user_id = Column(
@@ -116,6 +135,13 @@ class UserHistory(Base):
     nullable=False,
   )
   change_reason = Column(String(500), nullable=False)
+  anonymized_at = Column(DateTime(timezone=True), nullable=True)
+  anonymized_by_user_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("users.id", ondelete="RESTRICT"),
+    nullable=True,
+  )
+  anonymization_reason = Column(String(500), nullable=True)
 
   user = relationship(
     "User",
@@ -123,8 +149,37 @@ class UserHistory(Base):
     back_populates="history",
   )
   changed_by = relationship("User", foreign_keys=[changed_by_user_id])
+  anonymized_by = relationship("User", foreign_keys=[anonymized_by_user_id])
 
   __table_args__ = (
+    CheckConstraint(
+      "email <> ''",
+      name="ck_user_history_email_not_blank",
+    ),
+    CheckConstraint(
+      "btrim(first_name) <> ''",
+      name="ck_user_history_first_name_not_blank",
+    ),
+    CheckConstraint(
+      "btrim(last_name) <> ''",
+      name="ck_user_history_last_name_not_blank",
+    ),
+    CheckConstraint(
+      "btrim(change_reason) <> ''",
+      name="ck_user_history_change_reason_not_blank",
+    ),
+    CheckConstraint(
+      "(is_active IS TRUE AND deactivated_at IS NULL) OR "
+      "(is_active IS FALSE AND deactivated_at IS NOT NULL)",
+      name="ck_user_history_deactivation_state",
+    ),
+    CheckConstraint(
+      "(anonymized_at IS NULL AND anonymized_by_user_id IS NULL "
+      "AND anonymization_reason IS NULL) OR "
+      "(anonymized_at IS NOT NULL AND anonymized_by_user_id IS NOT NULL "
+      "AND btrim(anonymization_reason) <> '')",
+      name="ck_user_history_anonymization_state",
+    ),
     CheckConstraint(
       "valid_to IS NULL OR valid_to >= valid_from",
       name="ck_user_history_valid_period",

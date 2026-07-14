@@ -1,11 +1,12 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.user.models import User, UserHistory
+from src.core.constants import SYSTEM_USER_ID
+from src.user.models import Role, User, UserHistory
 
 
 class UserPersistence:
@@ -55,6 +56,42 @@ class UserPersistence:
       )
       .values(valid_to=valid_to)
     )
+
+
+  @staticmethod
+  async def bulk_anonymize_history(
+    db: AsyncSession,
+    target_roles: list[Role],
+    cutoff_date: datetime,
+  ) -> int:
+    """Irreversibly redact eligible history rows and record that redaction.
+
+    A database trigger accepts only this narrowly defined transition. Arbitrary
+    updates and every delete remain forbidden on the history table.
+    """
+    anonymized_at = datetime.now(timezone.utc)
+    eligible_users = select(User.id).where(
+      User.is_active.is_(False),
+      User.role.in_(target_roles),
+      User.deactivated_at < cutoff_date,
+    )
+    statement = (
+      update(UserHistory)
+      .where(
+        UserHistory.user_id.in_(eligible_users),
+        UserHistory.anonymized_at.is_(None),
+      )
+      .values(
+        first_name="gelöschter",
+        last_name="Nutzer",
+        email="deleted@local.com",
+        anonymized_at=anonymized_at,
+        anonymized_by_user_id=SYSTEM_USER_ID,
+        anonymization_reason="Retention period expired",
+      )
+    )
+    result = await db.execute(statement)
+    return int(result.rowcount or 0)
 
   @staticmethod
   async def get_history_by_user_id(

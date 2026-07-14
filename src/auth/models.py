@@ -41,6 +41,14 @@ class PasswordReset(Base):
   __table_args__ = (
     UniqueConstraint("user_id", name="uq_password_resets_user_id"),
     CheckConstraint(
+      "btrim(otp_hash) <> ''",
+      name="ck_password_resets_otp_hash_not_blank",
+    ),
+    CheckConstraint(
+      "expires_at > requested_at",
+      name="ck_password_resets_expiry_after_request",
+    ),
+    CheckConstraint(
       "failed_attempts >= 0",
       name="ck_password_resets_failed_attempts_nonnegative",
     ),
@@ -77,6 +85,21 @@ class RefreshSession(Base):
   """
 
   __tablename__ = "refresh_sessions"
+  __table_args__ = (
+    CheckConstraint(
+      "length(token_hash) = 64",
+      name="ck_refresh_sessions_token_hash_length",
+    ),
+    CheckConstraint(
+      "expires_at > created_at",
+      name="ck_refresh_sessions_expiry_after_creation",
+    ),
+    CheckConstraint(
+      "(revoked_at IS NULL AND revoke_reason IS NULL) OR "
+      "(revoked_at IS NOT NULL AND btrim(revoke_reason) <> '')",
+      name="ck_refresh_sessions_revocation_state",
+    ),
+  )
 
   # The session id is also the refresh token's JWT ``jti`` claim.
   id = Column(UUID(as_uuid=True), primary_key=True)

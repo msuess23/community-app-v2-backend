@@ -1,7 +1,7 @@
 """Add deactivated_at
 
 Revision ID: fdb0684b596d
-Revises: 76d8c7f82c01
+Revises: da0b35110185
 Create Date: 2026-07-08 02:06:30.463117
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'fdb0684b596d'
-down_revision: Union[str, Sequence[str], None] = '76d8c7f82c01'
+down_revision: Union[str, Sequence[str], None] = 'da0b35110185'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -38,6 +38,7 @@ class Office(Base):
     DateTime(timezone=True),
     nullable=False,
     default=lambda: datetime.now(timezone.utc),
+    server_default=func.now(),
   )
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
   address_id = Column(
@@ -60,6 +61,20 @@ class Office(Base):
 
   __table_args__ = (
     CheckConstraint("btrim(name) <> ''", name="ck_offices_name_not_blank"),
+    CheckConstraint(
+      "name = btrim(name)",
+      name="ck_offices_name_trimmed",
+    ),
+    CheckConstraint(
+      "contact_email IS NULL OR "
+      "(contact_email = lower(btrim(contact_email)) AND contact_email <> '')",
+      name="ck_offices_contact_email_canonical",
+    ),
+    CheckConstraint(
+      "(is_active IS TRUE AND deactivated_at IS NULL) OR "
+      "(is_active IS FALSE AND deactivated_at IS NOT NULL)",
+      name="ck_offices_deactivation_state",
+    ),
     CheckConstraint(
       "cardinality(services) <= 50",
       name="ck_offices_services_max_items",
@@ -95,8 +110,8 @@ class OfficeHistory(Base):
   description = Column(String(500), nullable=True)
   contact_email = Column(String(320), nullable=True)
   phone = Column(String(50), nullable=True)
-  services = Column(ARRAY(String), nullable=False, default=list)
-  opening_hours = Column(JSONB, nullable=False, default=dict)
+  services = Column(ARRAY(String), nullable=False, default=list, server_default="{}")
+  opening_hours = Column(JSONB, nullable=False, default=dict, server_default="{}")
   address_snapshot = Column(JSONB, nullable=True)
   is_active = Column(Boolean, nullable=False)
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
@@ -105,6 +120,7 @@ class OfficeHistory(Base):
     DateTime(timezone=True),
     nullable=False,
     default=lambda: datetime.now(timezone.utc),
+    server_default=func.now(),
   )
   valid_to = Column(DateTime(timezone=True), nullable=True)
   changed_by_user_id = Column(
@@ -118,6 +134,27 @@ class OfficeHistory(Base):
   changed_by = relationship("User", foreign_keys=[changed_by_user_id])
 
   __table_args__ = (
+    CheckConstraint(
+      "btrim(name) <> ''",
+      name="ck_office_history_name_not_blank",
+    ),
+    CheckConstraint(
+      "cardinality(services) <= 50",
+      name="ck_office_history_services_max_items",
+    ),
+    CheckConstraint(
+      "btrim(change_reason) <> ''",
+      name="ck_office_history_change_reason_not_blank",
+    ),
+    CheckConstraint(
+      "(is_active IS TRUE AND deactivated_at IS NULL) OR "
+      "(is_active IS FALSE AND deactivated_at IS NOT NULL)",
+      name="ck_office_history_deactivation_state",
+    ),
+    CheckConstraint(
+      "jsonb_typeof(opening_hours) = 'object'",
+      name="ck_office_history_opening_hours_object",
+    ),
     CheckConstraint(
       "valid_to IS NULL OR valid_to >= valid_from",
       name="ck_office_history_valid_period",

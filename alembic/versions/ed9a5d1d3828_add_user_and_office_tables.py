@@ -1,7 +1,7 @@
 """Add User and Office tables
 
 Revision ID: ed9a5d1d3828
-Revises: bd92acda75ce
+Revises:
 Create Date: 2026-07-07 01:30:37.003612
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'ed9a5d1d3828'
-down_revision: Union[str, Sequence[str], None] = 'bd92acda75ce'
+down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -26,8 +26,8 @@ def upgrade() -> None:
     sa.Column('name', sa.String(), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('name')
+    sa.PrimaryKeyConstraint('id', name='pk_offices'),
+    sa.UniqueConstraint('name', name='offices_name_key')
     )
     op.create_table('office_history',
     sa.Column('id', sa.UUID(), nullable=False),
@@ -36,8 +36,8 @@ def upgrade() -> None:
     sa.Column('changed_at', sa.DateTime(), nullable=True),
     sa.Column('changed_by_user_id', sa.UUID(), nullable=True),
     sa.Column('change_reason', sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(['office_id'], ['offices.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.ForeignKeyConstraint(['office_id'], ['offices.id'], name='fk_office_history_office_id_offices'),
+    sa.PrimaryKeyConstraint('id', name='pk_office_history')
     )
     op.create_index(op.f('ix_office_history_office_id'), 'office_history', ['office_id'], unique=False)
     op.create_table('users',
@@ -50,8 +50,8 @@ def upgrade() -> None:
     sa.Column('office_id', sa.UUID(), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.ForeignKeyConstraint(['office_id'], ['offices.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.ForeignKeyConstraint(['office_id'], ['offices.id'], name='fk_users_office_id_offices'),
+    sa.PrimaryKeyConstraint('id', name='pk_users')
     )
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
     op.create_table('user_history',
@@ -64,8 +64,8 @@ def upgrade() -> None:
     sa.Column('changed_at', sa.DateTime(), nullable=True),
     sa.Column('changed_by_user_id', sa.UUID(), nullable=True),
     sa.Column('change_reason', sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name='fk_user_history_user_id_users'),
+    sa.PrimaryKeyConstraint('id', name='pk_user_history')
     )
     op.create_index(op.f('ix_user_history_user_id'), 'user_history', ['user_id'], unique=False)
     # ### end Alembic commands ###

@@ -128,5 +128,8 @@ class UserHistoryResponse(BaseModel):
   change_reason: str
   valid_from: datetime
   valid_to: Optional[datetime] = None
+  anonymized_at: Optional[datetime] = None
+  anonymized_by_user_id: Optional[UUID] = None
+  anonymization_reason: Optional[str] = None
 
   model_config = ConfigDict(from_attributes=True)

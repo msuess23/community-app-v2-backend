@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Float, String
+from sqlalchemy import CheckConstraint, Column, DateTime, Float, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -24,12 +24,14 @@ class Address(Base):
     DateTime(timezone=True),
     nullable=False,
     default=lambda: datetime.now(timezone.utc),
+    server_default=func.now(),
   )
   updated_at = Column(
     DateTime(timezone=True),
     nullable=False,
     default=lambda: datetime.now(timezone.utc),
     onupdate=lambda: datetime.now(timezone.utc),
+    server_default=func.now(),
   )
 
   office = relationship(
@@ -46,4 +48,17 @@ class Address(Base):
     ),
     CheckConstraint("btrim(zip_code) <> ''", name="ck_addresses_zip_code_not_blank"),
     CheckConstraint("btrim(city) <> ''", name="ck_addresses_city_not_blank"),
+    CheckConstraint(
+      "(latitude IS NULL AND longitude IS NULL) OR "
+      "(latitude IS NOT NULL AND longitude IS NOT NULL)",
+      name="ck_addresses_coordinates_complete",
+    ),
+    CheckConstraint(
+      "latitude IS NULL OR latitude BETWEEN -90 AND 90",
+      name="ck_addresses_latitude_range",
+    ),
+    CheckConstraint(
+      "longitude IS NULL OR longitude BETWEEN -180 AND 180",
+      name="ck_addresses_longitude_range",
+    ),
   )
