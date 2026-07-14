@@ -9,7 +9,6 @@ from src.core.config import settings
 from src.core.database import get_db
 from src.core.exceptions import AuthenticationException, ForbiddenException
 from src.core.security import TokenType, TokenValidationError, decode_token
-from src.auth.repository import AuthRepository
 from src.user.models import Role, User
 
 
@@ -24,11 +23,6 @@ async def get_current_user(
         claims = decode_token(token, expected_type=TokenType.ACCESS)
     except TokenValidationError as exc:
         raise AuthenticationException("Could not validate credentials") from exc
-
-    # Temporary compatibility until the raw blacklist is replaced by refresh
-    # sessions in step 2. Keeping this check preserves current logout behavior.
-    if await AuthRepository.is_token_blacklisted(db, token):
-        raise AuthenticationException("Token has been revoked")
 
     user = await db.get(User, claims.sub)
     if user is None or not user.is_active:

@@ -8,6 +8,8 @@ from src.user.schemas import UserUpdate, AdminUserUpdate
 from src.core.exceptions import DomainException
 from src.core.filters import LifecycleStatusFilter
 from src.core.security import create_unusable_password_hash
+from src.auth.models import RefreshSessionRevokeReason
+from src.auth.repository import AuthRepository
 from src.user.repository import UserRepository
 
 class UserService:
@@ -118,6 +120,11 @@ class UserService:
     
     UserRepository.add(db, user)
     UserRepository.add_history(db, history_entry)
+    await AuthRepository.revoke_all_refresh_sessions_for_user(
+      db,
+      user.id,
+      RefreshSessionRevokeReason.ACCOUNT_DEACTIVATED,
+    )
     await db.commit()
 
   @staticmethod
