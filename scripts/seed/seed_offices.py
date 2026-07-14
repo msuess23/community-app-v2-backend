@@ -4,18 +4,22 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.address.schemas import AddressCreate
 from src.address.service import AddressService
 from src.office.audit import build_office_history
 from src.office.models import Office
 from src.office.repository import OfficeRepository
+from src.office.schemas import OfficeCreate
 
 
 logger = logging.getLogger(__name__)
 
 
+def _open(start: str, end: str) -> dict:
+  return {"closed": False, "intervals": [{"start": start, "end": end}]}
+
+
 async def run_office_seeder(db: AsyncSession, system_user_id: uuid.UUID) -> None:
-  """Seed default offices using the persisted technical principal as actor."""
+  """Seed default offices using validated domain payloads."""
   default_offices = [
     {
       "name": "Bauamt",
@@ -24,11 +28,11 @@ async def run_office_seeder(db: AsyncSession, system_user_id: uuid.UUID) -> None
       "phone": "+49 30 123456",
       "services": ["Baugenehmigung", "Stadtplanung"],
       "opening_hours": {
-        "monday": "08:00-12:00",
-        "tuesday": "08:00-12:00",
-        "wednesday": "08:00-12:00",
-        "thursday": "13:00-18:00",
-        "friday": "08:00-12:00",
+        "monday": _open("08:00", "12:00"),
+        "tuesday": _open("08:00", "12:00"),
+        "wednesday": _open("08:00", "12:00"),
+        "thursday": _open("13:00", "18:00"),
+        "friday": _open("08:00", "12:00"),
       },
       "address": {
         "street": "Rathausplatz",
@@ -46,11 +50,11 @@ async def run_office_seeder(db: AsyncSession, system_user_id: uuid.UUID) -> None
       "phone": "+49 30 987654",
       "services": ["Personalausweis", "Reisepass", "Ummeldung"],
       "opening_hours": {
-        "monday": "07:30-15:00",
-        "tuesday": "07:30-15:00",
-        "wednesday": "07:30-13:00",
-        "thursday": "10:00-18:00",
-        "friday": "07:30-12:00",
+        "monday": _open("07:30", "15:00"),
+        "tuesday": _open("07:30", "15:00"),
+        "wednesday": _open("07:30", "13:00"),
+        "thursday": _open("10:00", "18:00"),
+        "friday": _open("07:30", "12:00"),
       },
       "address": {
         "street": "Bahnhofstraße",
@@ -68,28 +72,30 @@ async def run_office_seeder(db: AsyncSession, system_user_id: uuid.UUID) -> None
     },
   ]
 
-  for office_data in default_offices:
-    existing = await OfficeRepository.get_by_name(db, office_data["name"])
+  for raw_office_data in default_offices:
+    office_data = OfficeCreate(**raw_office_data)
+    existing = await OfficeRepository.get_by_name(db, office_data.name)
     if existing is not None:
-      logger.info("Skipped existing seed office", extra={"office": office_data["name"]})
+      logger.info("Skipped existing seed office", extra={"office": office_data.name})
       continue
 
-    address_entity = None
-    if office_data["address"]:
-      address_entity = AddressService.create_address_entity(
-        AddressCreate(**office_data["address"])
-      )
-      db.add(address_entity)
-      await db.flush()
-
+    address_entity = (
+      AddressService.create_address_entity(office_data.address)
+      if office_data.address is not None
+      else None
+    )
     now = datetime.now(timezone.utc)
     new_office = Office(
-      name=office_data["name"],
-      description=office_data["description"],
-      contact_email=office_data.get("contact_email"),
-      phone=office_data.get("phone"),
-      services=office_data.get("services", []),
-      opening_hours=office_data.get("opening_hours", {}),
+      name=office_data.name,
+      description=office_data.description,
+      contact_email=(
+        str(office_data.contact_email)
+        if office_data.contact_email is not None
+        else None
+      ),
+      phone=office_data.phone,
+      services=list(office_data.services),
+      opening_hours=office_data.opening_hours.model_dump(mode="json"),
       address=address_entity,
       created_at=now,
     )

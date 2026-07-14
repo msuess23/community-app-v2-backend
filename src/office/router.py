@@ -1,18 +1,20 @@
 import uuid
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import role_required
 from src.core.database import get_db
-from src.core.filters import LifecycleStatusFilter, get_bbox_filter
+from src.core.filters import BoundingBox, LifecycleStatusFilter, get_bbox_filter
+from src.core.pagination import Page, PaginationParams, SortOrder
 from src.office.schemas import (
   OfficeCreate,
   OfficeDeactivate,
   OfficeHistoryResponse,
   OfficeResponse,
+  OfficeSortField,
   OfficeUpdate,
 )
 from src.office.service import OfficeService
@@ -22,34 +24,65 @@ from src.user.models import User
 router = APIRouter()
 
 
-@router.get("", response_model=List[OfficeResponse])
-async def get_all_offices(
-  q: Optional[str] = Query(None),
-  bbox: Optional[Tuple[float, float, float, float]] = Depends(get_bbox_filter),
-  skip: int = 0,
-  limit: int = 100,
-  status_filter: LifecycleStatusFilter = Query(
-    LifecycleStatusFilter.ACTIVE,
-    alias="status",
-  ),
+@router.get("", response_model=Page[OfficeResponse])
+async def get_public_offices(
+  q: Optional[str] = Query(None, min_length=1, max_length=100),
+  bbox: Optional[BoundingBox] = Depends(get_bbox_filter),
+  sort_by: OfficeSortField = Query(OfficeSortField.NAME),
+  order: SortOrder = Query(SortOrder.ASC),
+  pagination: PaginationParams = Depends(),
   db: AsyncSession = Depends(get_db),
 ):
-  return await OfficeService.get_all_offices(
-    db=db,
-    skip=skip,
-    limit=limit,
-    status=status_filter,
+  return await OfficeService.get_public_offices(
+    db,
+    pagination=pagination,
     search=q,
     bbox=bbox,
+    sort_by=sort_by,
+    order=order,
   )
 
 
+@router.get("/admin", response_model=Page[OfficeResponse])
+async def get_admin_offices(
+  q: Optional[str] = Query(None, min_length=1, max_length=100),
+  bbox: Optional[BoundingBox] = Depends(get_bbox_filter),
+  status_filter: LifecycleStatusFilter = Query(
+    LifecycleStatusFilter.ALL,
+    alias="status",
+  ),
+  sort_by: OfficeSortField = Query(OfficeSortField.NAME),
+  order: SortOrder = Query(SortOrder.ASC),
+  pagination: PaginationParams = Depends(),
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(role_required(["ADMIN"])),
+):
+  return await OfficeService.get_admin_offices(
+    db,
+    pagination=pagination,
+    status=status_filter,
+    search=q,
+    bbox=bbox,
+    sort_by=sort_by,
+    order=order,
+  )
+
+
+@router.get("/admin/{office_id}", response_model=OfficeResponse)
+async def get_admin_office(
+  office_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(role_required(["ADMIN"])),
+):
+  return await OfficeService.get_office_by_id(db, office_id)
+
+
 @router.get("/{office_id}", response_model=OfficeResponse)
-async def get_office(
+async def get_public_office(
   office_id: uuid.UUID,
   db: AsyncSession = Depends(get_db),
 ):
-  return await OfficeService.get_office_by_id(db, office_id)
+  return await OfficeService.get_public_office_by_id(db, office_id)
 
 
 @router.post("", response_model=OfficeResponse, status_code=status.HTTP_201_CREATED)
@@ -92,7 +125,7 @@ async def deactivate_office(
   )
 
 
-@router.get("/{office_id}/history", response_model=List[OfficeHistoryResponse])
+@router.get("/{office_id}/history", response_model=list[OfficeHistoryResponse])
 async def get_office_history(
   office_id: uuid.UUID,
   start_date: Optional[datetime] = Query(None),

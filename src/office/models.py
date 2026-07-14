@@ -10,6 +10,7 @@ from sqlalchemy import (
   ForeignKey,
   Index,
   String,
+  UniqueConstraint,
   func,
   text,
 )
@@ -39,8 +40,18 @@ class Office(Base):
     default=lambda: datetime.now(timezone.utc),
   )
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
-  address_id = Column(UUID(as_uuid=True), ForeignKey("addresses.id"), nullable=True)
-  address = relationship(Address, backref="offices")
+  address_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("addresses.id", ondelete="RESTRICT"),
+    nullable=True,
+  )
+  address = relationship(
+    Address,
+    back_populates="office",
+    uselist=False,
+    cascade="save-update, merge",
+    single_parent=True,
+  )
   history = relationship(
     "OfficeHistory",
     back_populates="office",
@@ -48,6 +59,16 @@ class Office(Base):
   )
 
   __table_args__ = (
+    CheckConstraint("btrim(name) <> ''", name="ck_offices_name_not_blank"),
+    CheckConstraint(
+      "cardinality(services) <= 50",
+      name="ck_offices_services_max_items",
+    ),
+    CheckConstraint(
+      "jsonb_typeof(opening_hours) = 'object'",
+      name="ck_offices_opening_hours_object",
+    ),
+    UniqueConstraint("address_id", name="uq_offices_address_id"),
     Index(
       "uq_offices_active_name_ci",
       func.lower(name),

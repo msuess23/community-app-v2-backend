@@ -35,8 +35,8 @@ class User(Base):
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
   email = Column(String(320), nullable=False)
   hashed_password = Column(String, nullable=False)
-  first_name = Column(String, nullable=False)
-  last_name = Column(String, nullable=False)
+  first_name = Column(String(100), nullable=False)
+  last_name = Column(String(100), nullable=False)
   role = Column(
     Enum(Role),
     nullable=False,
@@ -62,6 +62,14 @@ class User(Base):
 
   __table_args__ = (
     CheckConstraint(
+      "btrim(first_name) <> ''",
+      name="ck_users_first_name_not_blank",
+    ),
+    CheckConstraint(
+      "btrim(last_name) <> ''",
+      name="ck_users_last_name_not_blank",
+    ),
+    CheckConstraint(
       "((role IN ('CITIZEN', 'ADMIN') AND office_id IS NULL) "
       "OR (role IN ('DISPATCHER', 'OFFICER', 'MANAGER') "
       "AND office_id IS NOT NULL))",
@@ -85,8 +93,8 @@ class UserHistory(Base):
   )
 
   email = Column(String(320), nullable=False)
-  first_name = Column(String, nullable=False)
-  last_name = Column(String, nullable=False)
+  first_name = Column(String(100), nullable=False)
+  last_name = Column(String(100), nullable=False)
   role = Column(Enum(Role), nullable=False)
   office_id = Column(
     UUID(as_uuid=True),

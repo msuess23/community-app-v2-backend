@@ -1,14 +1,14 @@
 import uuid
 from typing import Optional
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from src.address.models import Address
 
+
 class AddressRepository:
-  """
-  Data access layer for Address entities.
-  """
+  """Read access for office-owned address entities."""
 
   @staticmethod
   async def get_by_id(db: AsyncSession, address_id: uuid.UUID) -> Optional[Address]:
@@ -17,10 +17,4 @@ class AddressRepository:
 
   @staticmethod
   def add(db: AsyncSession, address: Address) -> None:
-    """Stages an address entity for insertion or update."""
     db.add(address)
-    
-  @staticmethod
-  async def delete(db: AsyncSession, address: Address) -> None:
-    """Directly deletes an address from the database."""
-    await db.delete(address)

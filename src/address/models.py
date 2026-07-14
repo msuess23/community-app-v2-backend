@@ -1,26 +1,49 @@
 import uuid
-from sqlalchemy import Column, String, Float, DateTime
-from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime, timezone
+
+from sqlalchemy import CheckConstraint, Column, DateTime, Float, String
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from src.core.database import Base
 
+
 class Address(Base):
-  """
-  Represents a physical location including geographical coordinates.
-  Used as a related entity for Offices, Tickets, and potentially Users.
-  """
+  """Physical address owned by at most one office."""
+
   __tablename__ = "addresses"
 
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-  street = Column(String, nullable=False)
-  house_number = Column(String, nullable=False)
-  zip_code = Column(String, nullable=False)
-  city = Column(String, nullable=False)
-  
-  # Coordinates are optional but highly recommended for the map features
+  street = Column(String(150), nullable=False)
+  house_number = Column(String(20), nullable=False)
+  zip_code = Column(String(20), nullable=False)
+  city = Column(String(100), nullable=False)
   latitude = Column(Float, nullable=True)
   longitude = Column(Float, nullable=True)
-  
-  created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-  updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+  created_at = Column(
+    DateTime(timezone=True),
+    nullable=False,
+    default=lambda: datetime.now(timezone.utc),
+  )
+  updated_at = Column(
+    DateTime(timezone=True),
+    nullable=False,
+    default=lambda: datetime.now(timezone.utc),
+    onupdate=lambda: datetime.now(timezone.utc),
+  )
+
+  office = relationship(
+    "Office",
+    back_populates="address",
+    uselist=False,
+  )
+
+  __table_args__ = (
+    CheckConstraint("btrim(street) <> ''", name="ck_addresses_street_not_blank"),
+    CheckConstraint(
+      "btrim(house_number) <> ''",
+      name="ck_addresses_house_number_not_blank",
+    ),
+    CheckConstraint("btrim(zip_code) <> ''", name="ck_addresses_zip_code_not_blank"),
+    CheckConstraint("btrim(city) <> ''", name="ck_addresses_city_not_blank"),
+  )

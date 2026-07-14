@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,13 +8,16 @@ from sqlalchemy.orm import selectinload
 
 from src.address.models import Address
 from src.core.filters import (
+  BoundingBox,
   LifecycleStatusFilter,
   apply_bbox_filter,
   apply_lifecycle_filter,
   apply_search_filter,
 )
 from src.core.normalization import normalize_office_name
+from src.core.pagination import PaginationParams, SortOrder
 from src.office.models import Office, OfficeHistory
+from src.office.schemas import OfficeSortField
 
 
 class OfficeRepository:
@@ -26,6 +29,18 @@ class OfficeRepository:
       select(Office)
       .options(selectinload(Office.address))
       .where(Office.id == office_id)
+    )
+    return result.scalar_one_or_none()
+
+  @staticmethod
+  async def get_active_by_id(
+    db: AsyncSession,
+    office_id: uuid.UUID,
+  ) -> Optional[Office]:
+    result = await db.execute(
+      select(Office)
+      .options(selectinload(Office.address))
+      .where(Office.id == office_id, Office.is_active.is_(True))
     )
     return result.scalar_one_or_none()
 
@@ -65,25 +80,44 @@ class OfficeRepository:
     return result.scalar_one_or_none()
 
   @staticmethod
-  async def get_all(
+  async def get_page(
     db: AsyncSession,
-    skip: int = 0,
-    limit: int = 100,
-    status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
-    search: Optional[str] = None,
-    bbox: Optional[Tuple[float, float, float, float]] = None,
-  ) -> List[Office]:
+    *,
+    pagination: PaginationParams,
+    status: LifecycleStatusFilter,
+    search: Optional[str],
+    bbox: Optional[BoundingBox],
+    sort_by: OfficeSortField,
+    order: SortOrder,
+  ) -> tuple[list[Office], int]:
     query = select(Office).options(selectinload(Office.address))
     query = apply_lifecycle_filter(query, Office, status)
     query = apply_search_filter(query, search, Office.name, Office.description)
 
-    if bbox:
+    if bbox is not None:
       query = query.join(Office.address)
       query = apply_bbox_filter(query, Address, bbox)
 
-    query = query.order_by(Office.name, Office.id).offset(skip).limit(limit)
+    total_query = select(func.count()).select_from(
+      query.order_by(None).options().subquery()
+    )
+    total = int((await db.execute(total_query)).scalar_one())
+
+    sort_columns = {
+      OfficeSortField.NAME: Office.name,
+      OfficeSortField.CREATED_AT: Office.created_at,
+    }
+    sort_column = sort_columns[sort_by]
+    sort_expression = sort_column.asc() if order == SortOrder.ASC else sort_column.desc()
+    id_tie_breaker = Office.id.asc() if order == SortOrder.ASC else Office.id.desc()
+
+    query = (
+      query.order_by(sort_expression, id_tie_breaker)
+      .offset(pagination.offset)
+      .limit(pagination.size)
+    )
     result = await db.execute(query)
-    return list(result.scalars().all())
+    return list(result.scalars().all()), total
 
   @staticmethod
   def add(db: AsyncSession, office: Office) -> None:
@@ -115,7 +149,7 @@ class OfficeRepository:
     office_id: uuid.UUID,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-  ) -> List[OfficeHistory]:
+  ) -> list[OfficeHistory]:
     """Return versions whose validity interval overlaps the requested range."""
     query = select(OfficeHistory).where(OfficeHistory.office_id == office_id)
 

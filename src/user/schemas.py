@@ -1,18 +1,32 @@
 from datetime import datetime
+from enum import Enum
 from typing import Annotated, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
+from pydantic import (
+  BaseModel,
+  BeforeValidator,
+  ConfigDict,
+  EmailStr,
+  Field,
+  model_validator,
+)
 
-from src.core.normalization import normalize_email
+from src.core.normalization import normalize_email, normalize_text
 from src.core.schemas import BaseMetadataResponse
 from src.core.validation import PasswordValue
 from src.user.models import Role
 
 
 NormalizedEmail = Annotated[EmailStr, BeforeValidator(normalize_email)]
+PersonName = Annotated[
+  str,
+  BeforeValidator(normalize_text),
+  Field(min_length=2, max_length=100),
+]
 ChangeReason = Annotated[
   str,
+  BeforeValidator(normalize_text),
   Field(
     min_length=3,
     max_length=500,
@@ -21,13 +35,20 @@ ChangeReason = Annotated[
 ]
 
 
+class UserSortField(str, Enum):
+  LAST_NAME = "last_name"
+  FIRST_NAME = "first_name"
+  EMAIL = "email"
+  CREATED_AT = "created_at"
+
+
 class UserCreate(BaseModel):
   """Public citizen registration payload."""
 
   email: NormalizedEmail
   password: PasswordValue
-  first_name: str = Field(..., min_length=2)
-  last_name: str = Field(..., min_length=2)
+  first_name: PersonName
+  last_name: PersonName
 
 
 class AdminUserCreate(BaseModel):
@@ -35,8 +56,8 @@ class AdminUserCreate(BaseModel):
 
   email: NormalizedEmail
   password: PasswordValue
-  first_name: str = Field(..., min_length=2)
-  last_name: str = Field(..., min_length=2)
+  first_name: PersonName
+  last_name: PersonName
   role: Role
   office_id: Optional[UUID] = None
   change_reason: ChangeReason
@@ -56,19 +77,37 @@ class UserResponse(BaseMetadataResponse):
 class UserUpdate(BaseModel):
   """Fields a user may change on their own profile plus an audit reason."""
 
-  first_name: Optional[str] = Field(None, min_length=2)
-  last_name: Optional[str] = Field(None, min_length=2)
+  first_name: Optional[PersonName] = None
+  last_name: Optional[PersonName] = None
   change_reason: ChangeReason
+
+  @model_validator(mode="before")
+  @classmethod
+  def reject_null_names(cls, data):
+    if isinstance(data, dict):
+      for field in ("first_name", "last_name"):
+        if field in data and data[field] is None:
+          raise ValueError(f"{field} cannot be null")
+    return data
 
 
 class AdminUserUpdate(BaseModel):
   """Administrative partial update command for a user account."""
 
-  first_name: Optional[str] = Field(None, min_length=2)
-  last_name: Optional[str] = Field(None, min_length=2)
+  first_name: Optional[PersonName] = None
+  last_name: Optional[PersonName] = None
   role: Optional[Role] = None
   office_id: Optional[UUID] = None
   change_reason: ChangeReason
+
+  @model_validator(mode="before")
+  @classmethod
+  def reject_null_non_nullable_fields(cls, data):
+    if isinstance(data, dict):
+      for field in ("first_name", "last_name", "role"):
+        if field in data and data[field] is None:
+          raise ValueError(f"{field} cannot be null")
+    return data
 
 
 class UserDeactivate(BaseModel):

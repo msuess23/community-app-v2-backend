@@ -1,17 +1,23 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.address.service import AddressService
 from src.core.exceptions import ConflictException, ResourceNotFoundException
-from src.core.filters import LifecycleStatusFilter
-from src.core.normalization import normalize_office_name
+from src.core.filters import BoundingBox, LifecycleStatusFilter
+from src.core.normalization import normalize_email, normalize_office_name
+from src.core.pagination import Page, PaginationParams, SortOrder
 from src.office.audit import build_office_history
 from src.office.models import Office, OfficeHistory
 from src.office.repository import OfficeRepository
-from src.office.schemas import OfficeCreate, OfficeUpdate
+from src.office.schemas import (
+  OfficeCreate,
+  OfficeResponse,
+  OfficeSortField,
+  OfficeUpdate,
+)
 from src.user.persistence import UserPersistence
 
 
@@ -29,26 +35,64 @@ class OfficeService:
     return office
 
   @staticmethod
-  async def get_all_offices(
+  async def get_public_offices(
     db: AsyncSession,
-    skip: int = 0,
-    limit: int = 100,
-    status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
-    search: Optional[str] = None,
-    bbox: Optional[Tuple[float, float, float, float]] = None,
-  ):
-    return await OfficeRepository.get_all(
+    *,
+    pagination: PaginationParams,
+    search: Optional[str],
+    bbox: Optional[BoundingBox],
+    sort_by: OfficeSortField,
+    order: SortOrder,
+  ) -> Page[OfficeResponse]:
+    offices, total = await OfficeRepository.get_page(
       db,
-      skip,
-      limit,
-      status,
-      search,
-      bbox,
+      pagination=pagination,
+      status=LifecycleStatusFilter.ACTIVE,
+      search=search,
+      bbox=bbox,
+      sort_by=sort_by,
+      order=order,
     )
+    return Page.create(data=offices, total=total, pagination=pagination)
+
+  @staticmethod
+  async def get_admin_offices(
+    db: AsyncSession,
+    *,
+    pagination: PaginationParams,
+    status: LifecycleStatusFilter,
+    search: Optional[str],
+    bbox: Optional[BoundingBox],
+    sort_by: OfficeSortField,
+    order: SortOrder,
+  ) -> Page[OfficeResponse]:
+    offices, total = await OfficeRepository.get_page(
+      db,
+      pagination=pagination,
+      status=status,
+      search=search,
+      bbox=bbox,
+      sort_by=sort_by,
+      order=order,
+    )
+    return Page.create(data=offices, total=total, pagination=pagination)
 
   @staticmethod
   async def get_office_by_id(db: AsyncSession, office_id: uuid.UUID) -> Office:
     office = await OfficeRepository.get_by_id(db, office_id)
+    if office is None:
+      raise ResourceNotFoundException(
+        "Office not found",
+        error_code="OFFICE_NOT_FOUND",
+      )
+    return office
+
+  @staticmethod
+  async def get_public_office_by_id(
+    db: AsyncSession,
+    office_id: uuid.UUID,
+  ) -> Office:
+    office = await OfficeRepository.get_active_by_id(db, office_id)
     if office is None:
       raise ResourceNotFoundException(
         "Office not found",
@@ -69,28 +113,24 @@ class OfficeService:
         error_code="OFFICE_NAME_ALREADY_EXISTS",
       )
 
-    address_entity = None
-    if office_data.address:
-      address_entity = AddressService.create_address_entity(office_data.address)
-      db.add(address_entity)
-      await db.flush()
+    address_entity = (
+      AddressService.create_address_entity(office_data.address)
+      if office_data.address is not None
+      else None
+    )
 
     now = datetime.now(timezone.utc)
     new_office = Office(
       name=normalized_name,
       description=office_data.description,
       contact_email=(
-        str(office_data.contact_email)
+        normalize_email(office_data.contact_email)
         if office_data.contact_email is not None
         else None
       ),
       phone=office_data.phone,
       services=list(office_data.services),
-      opening_hours=(
-        office_data.opening_hours.model_dump(exclude_unset=True)
-        if office_data.opening_hours
-        else {}
-      ),
+      opening_hours=office_data.opening_hours.model_dump(mode="json"),
       address=address_entity,
       created_at=now,
     )
@@ -151,24 +191,23 @@ class OfficeService:
 
     address_update = changes.pop("address", None)
     if address_update is not None:
-      if locked_office.address:
+      if locked_office.address is not None:
         AddressService.update_address_entity(
           locked_office.address,
           update_data.address,
         )
       else:
-        new_address = AddressService.create_address_entity(update_data.address)
-        db.add(new_address)
-        await db.flush()
-        locked_office.address = new_address
+        locked_office.address = AddressService.create_address_entity(
+          update_data.address
+        )
 
     for key, value in changes.items():
-      if key == "opening_hours" and value is not None:
-        value = dict(value)
+      if key == "opening_hours" and update_data.opening_hours is not None:
+        value = update_data.opening_hours.model_dump(mode="json")
       elif key == "services" and value is not None:
         value = list(value)
       elif key == "contact_email" and value is not None:
-        value = str(value)
+        value = normalize_email(value)
       setattr(locked_office, key, value)
 
     OfficeRepository.add_history(

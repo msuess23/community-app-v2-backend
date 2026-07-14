@@ -14,14 +14,22 @@ from src.core.exceptions import (
 )
 from src.core.filters import LifecycleStatusFilter
 from src.core.normalization import normalize_email
+from src.core.pagination import Page, PaginationParams, SortOrder
 from src.core.security import create_unusable_password_hash, get_password_hash
 from src.office.repository import OfficeRepository
 from src.user.audit import build_user_history
 from src.user.models import Role, User, UserHistory
 from src.user.persistence import UserPersistence
 from src.user.policies import UserAssignmentPolicy, UserPolicy
+from src.user.query_repository import UserQueryRepository
 from src.user.repository import UserRepository
-from src.user.schemas import AdminUserCreate, AdminUserUpdate, UserUpdate
+from src.user.schemas import (
+  AdminUserCreate,
+  AdminUserUpdate,
+  UserResponse,
+  UserSortField,
+  UserUpdate,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -212,26 +220,30 @@ class UserService:
   async def get_all_users(
     db: AsyncSession,
     current_user: User,
-    skip: int = 0,
-    limit: int = 100,
+    *,
+    pagination: PaginationParams,
     office_id: Optional[uuid.UUID] = None,
     role: Optional[Role] = None,
     status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
     search: Optional[str] = None,
-  ):
+    sort_by: UserSortField = UserSortField.LAST_NAME,
+    order: SortOrder = SortOrder.ASC,
+  ) -> Page[UserResponse]:
     scope = UserPolicy.resolve_read_scope(
       current_user,
       requested_office_id=office_id,
       requested_role=role,
       requested_status=status,
     )
-    return await UserRepository.get_all(
+    users, total = await UserQueryRepository.get_page(
       db,
-      scope,
-      skip=skip,
-      limit=limit,
+      scope=scope,
+      pagination=pagination,
       search=search,
+      sort_by=sort_by,
+      order=order,
     )
+    return Page.create(data=users, total=total, pagination=pagination)
 
   @staticmethod
   async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User:
