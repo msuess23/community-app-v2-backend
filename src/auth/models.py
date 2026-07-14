@@ -2,7 +2,16 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, func
+from sqlalchemy import (
+  CheckConstraint,
+  Column,
+  DateTime,
+  ForeignKey,
+  Integer,
+  String,
+  UniqueConstraint,
+  func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 
 from src.core.database import Base
@@ -21,17 +30,41 @@ class RefreshSessionRevokeReason(str, enum.Enum):
 
 
 class PasswordReset(Base):
-  """Stores hashed OTPs for password reset requests securely."""
+  """
+  Stores the single active password-reset challenge for a user.
+
+  The one-row-per-user constraint prevents ambiguous challenges. OTP attempts
+  are counted on the locked row so validation and consumption are atomic.
+  """
 
   __tablename__ = "password_resets"
+  __table_args__ = (
+    UniqueConstraint("user_id", name="uq_password_resets_user_id"),
+    CheckConstraint(
+      "failed_attempts >= 0",
+      name="ck_password_resets_failed_attempts_nonnegative",
+    ),
+  )
 
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-  email = Column(String, index=True, nullable=False)
+  user_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("users.id", ondelete="CASCADE"),
+    nullable=False,
+  )
   otp_hash = Column(String, nullable=False)
-  expires_at = Column(DateTime(timezone=True), nullable=False)
-  created_at = Column(
+  failed_attempts = Column(
+    Integer,
+    nullable=False,
+    default=0,
+    server_default="0",
+  )
+  expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+  requested_at = Column(
     DateTime(timezone=True),
+    nullable=False,
     default=lambda: datetime.now(timezone.utc),
+    server_default=func.now(),
   )
 
 

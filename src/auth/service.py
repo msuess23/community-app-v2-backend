@@ -7,13 +7,13 @@ from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.models import (
-  PasswordReset,
   RefreshSession,
   RefreshSessionRevokeReason,
 )
 from src.auth.repository import AuthRepository
 from src.auth.schemas import ResetPasswordRequest, TokenResponse
-from src.core.email import send_otp_email
+from src.core.config import settings
+from src.core.email import send_otp_email, send_password_changed_email
 from src.core.exceptions import AuthenticationException, DomainException
 from src.core.security import (
   TokenType,
@@ -27,9 +27,13 @@ from src.core.security import (
   verify_and_update_password,
   verify_password,
 )
+from src.core.validation import has_valid_password_length
 from src.user.models import User, UserHistory
 from src.user.repository import UserRepository
 from src.user.schemas import UserCreate
+
+
+_INVALID_RESET_MESSAGE = "Invalid or expired password-reset code"
 
 
 class AuthService:
@@ -84,6 +88,11 @@ class AuthService:
     password: str,
   ) -> TokenResponse:
     """Authenticate a user and create an independent refresh-session family."""
+    # OAuth2PasswordRequestForm is not a Pydantic request model. Enforce the
+    # same maximum here before handing untrusted input to Argon2/bcrypt.
+    if not has_valid_password_length(password):
+      raise AuthenticationException("Incorrect email or password")
+
     user = await UserRepository.get_by_email(db, email=email)
     if user is None:
       raise AuthenticationException("Incorrect email or password")
@@ -233,62 +242,113 @@ class AuthService:
     email: str,
     background_tasks: BackgroundTasks,
   ) -> None:
-    """Create a reset OTP without revealing whether an active user exists."""
+    """
+    Create or rotate a reset OTP without revealing account existence.
+
+    The database upsert enforces one challenge per user and a per-account
+    cooldown even when multiple requests arrive concurrently.
+    """
     user = await UserRepository.get_by_email(db, email)
     if user is None or not user.is_active:
       return
 
-    await AuthRepository.delete_password_resets_by_email(db, email)
-
-    otp_code = "".join(secrets.choice(string.digits) for _ in range(6))
-    expires = datetime.now(timezone.utc) + timedelta(minutes=15)
-    reset_record = PasswordReset(
-      email=email,
-      otp_hash=get_password_hash(otp_code),
-      expires_at=expires,
+    now = datetime.now(timezone.utc)
+    cooldown_before = (
+      now
+      - timedelta(
+        seconds=settings.PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS,
+      )
     )
 
-    AuthRepository.add_password_reset(db, reset_record)
+    # Avoid an unnecessary Argon2 hash for repeated requests that are already
+    # inside the cooldown. The subsequent UPSERT still enforces the rule
+    # atomically and closes the race between this fast-path check and INSERT.
+    existing_reset = await AuthRepository.get_password_reset_by_user_id(
+      db,
+      user.id,
+    )
+    if (
+      existing_reset is not None
+      and existing_reset.requested_at > cooldown_before
+    ):
+      await db.rollback()
+      return
+
+    otp_code = "".join(secrets.choice(string.digits) for _ in range(6))
+    accepted = await AuthRepository.upsert_password_reset(
+      db,
+      user_id=user.id,
+      otp_hash=get_password_hash(otp_code),
+      expires_at=(
+        now + timedelta(minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES)
+      ),
+      requested_at=now,
+      cooldown_before=cooldown_before,
+    )
     await db.commit()
-    background_tasks.add_task(send_otp_email, email, otp_code)
+
+    if accepted:
+      background_tasks.add_task(send_otp_email, user.email, otp_code)
 
   @staticmethod
   async def reset_password(
     db: AsyncSession,
     data: ResetPasswordRequest,
+    background_tasks: BackgroundTasks,
   ) -> None:
-    """Validate the OTP, change the password, and revoke active sessions."""
-    reset_record = await AuthRepository.get_password_reset_by_email(
+    """
+    Atomically validate and consume an OTP, then revoke all login sessions.
+
+    All failure modes intentionally use the same public error response to avoid
+    disclosing whether an account or a usable reset challenge exists.
+    """
+    user = await UserRepository.get_by_email_for_update(db, data.email)
+    if user is None or not user.is_active:
+      raise AuthService._invalid_password_reset()
+
+    reset_record = await AuthRepository.get_password_reset_for_update(
       db,
-      data.email,
+      user.id,
     )
+    now = datetime.now(timezone.utc)
 
-    if not reset_record:
-      raise DomainException("Invalid or expired OTP", status_code=400)
+    if reset_record is None:
+      raise AuthService._invalid_password_reset()
 
-    if reset_record.expires_at < datetime.now(timezone.utc):
+    if reset_record.expires_at <= now:
       await AuthRepository.delete_password_reset_by_id(db, reset_record.id)
       await db.commit()
-      raise DomainException("OTP has expired", status_code=400)
+      raise AuthService._invalid_password_reset()
+
+    if reset_record.failed_attempts >= settings.PASSWORD_RESET_MAX_ATTEMPTS:
+      raise AuthService._invalid_password_reset()
 
     if not verify_password(data.otp, reset_record.otp_hash):
-      raise DomainException("Invalid OTP", status_code=400)
-
-    user = await UserRepository.get_by_email(db, data.email)
-    if user is None or not user.is_active:
-      raise DomainException("Invalid or expired OTP", status_code=400)
+      reset_record.failed_attempts += 1
+      await db.commit()
+      raise AuthService._invalid_password_reset()
 
     user.hashed_password = get_password_hash(data.new_password)
     user.auth_version += 1
-    UserRepository.add(db, user)
 
     await AuthRepository.revoke_all_refresh_sessions_for_user(
       db,
       user.id,
       RefreshSessionRevokeReason.PASSWORD_RESET,
+      revoked_at=now,
     )
     await AuthRepository.delete_password_reset_by_id(db, reset_record.id)
     await db.commit()
+
+    background_tasks.add_task(send_password_changed_email, user.email)
+
+  @staticmethod
+  def _invalid_password_reset() -> DomainException:
+    return DomainException(
+      _INVALID_RESET_MESSAGE,
+      error_code="PASSWORD_RESET_INVALID",
+      status_code=400,
+    )
 
   @staticmethod
   async def logout(

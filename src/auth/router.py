@@ -68,10 +68,11 @@ async def forgot_password_request(
 @router.post("/reset-password")
 async def reset_password(
   request: ResetPasswordRequest,
+  background_tasks: BackgroundTasks,
   db: AsyncSession = Depends(get_db),
 ):
-  """Resets the password using a valid OTP."""
-  await AuthService.reset_password(db, request)
+  """Resets the password using a valid, single-use OTP."""
+  await AuthService.reset_password(db, request, background_tasks)
   return {"message": "Password updated successfully."}
 
 

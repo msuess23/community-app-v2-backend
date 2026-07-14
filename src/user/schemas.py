@@ -5,10 +5,11 @@ from datetime import datetime
 
 from src.user.models import Role
 from src.core.schemas import BaseMetadataResponse
+from src.core.validation import PasswordValue
 
 class UserCreate(BaseModel):
   email: EmailStr
-  password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
+  password: PasswordValue
   first_name: str = Field(..., min_length=2)
   last_name: str = Field(..., min_length=2)
 

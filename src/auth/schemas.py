@@ -1,5 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field, SecretStr
 
+from src.core.validation import MAX_REFRESH_TOKEN_LENGTH, PasswordValue
+
 
 class TokenResponse(BaseModel):
   access_token: str
@@ -8,7 +10,10 @@ class TokenResponse(BaseModel):
 
 
 class RefreshTokenRequest(BaseModel):
-  refresh_token: SecretStr = Field(min_length=1)
+  refresh_token: SecretStr = Field(
+    min_length=1,
+    max_length=MAX_REFRESH_TOKEN_LENGTH,
+  )
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -17,5 +22,5 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
   email: EmailStr
-  otp: str
-  new_password: str
+  otp: str = Field(pattern=r"^[0-9]{6}$")
+  new_password: PasswordValue

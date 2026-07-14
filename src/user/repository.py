@@ -21,6 +21,19 @@ class UserRepository:
     return result.scalar_one_or_none()
 
   @staticmethod
+  async def get_by_email_for_update(
+    db: AsyncSession,
+    email: str,
+  ) -> Optional[User]:
+    """Fetch and lock a user for a security-sensitive mutation."""
+    result = await db.execute(
+      select(User)
+      .where(User.email == email)
+      .with_for_update()
+    )
+    return result.scalar_one_or_none()
+
+  @staticmethod
   async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> Optional[User]:
     """Fetches a user by their UUID."""
     result = await db.execute(select(User).where(User.id == user_id))

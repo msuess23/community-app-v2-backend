@@ -17,6 +17,15 @@ class Settings(BaseSettings):
   ACCESS_TOKEN_EXPIRE_MINUTES: int
   REFRESH_TOKEN_EXPIRE_DAYS: int
 
+  # Password-reset configuration
+  PASSWORD_RESET_EXPIRE_MINUTES: int = Field(default=15, ge=5, le=60)
+  PASSWORD_RESET_MAX_ATTEMPTS: int = Field(default=5, ge=1, le=10)
+  PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS: int = Field(
+    default=60,
+    ge=0,
+    le=3600,
+  )
+
   # Database atomic variables
   POSTGRES_USER: str
   POSTGRES_PASSWORD: str
@@ -30,6 +39,7 @@ class Settings(BaseSettings):
   SMTP_USER: str = ""
   SMTP_PASSWORD: str = ""
   SMTP_TLS: bool = True
+  SMTP_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
 
   # Construct the DATABASE_URL dynamically from atomic variables
   @computed_field
