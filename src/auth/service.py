@@ -112,6 +112,7 @@ class AuthService:
       raise DomainException("User not found", status_code=404)
       
     user.hashed_password = get_password_hash(data.new_password)
+    user.auth_version += 1
     UserRepository.add(db, user)
     
     # Cleanup used OTP

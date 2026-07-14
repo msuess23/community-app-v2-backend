@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Enum, ForeignKey, DateTime, Boolean
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -25,6 +25,7 @@ class User(Base):
   role = Column(Enum(Role), default=Role.CITIZEN)
   office_id = Column(UUID(as_uuid=True), ForeignKey("offices.id"), nullable=True)
   is_active = Column(Boolean, default=True)
+  auth_version = Column(Integer, nullable=False, default=0, server_default="0")
   created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
 

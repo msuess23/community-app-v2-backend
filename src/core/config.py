@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import computed_field
+from typing import Literal
+
+from pydantic import Field, computed_field
 
 class Settings(BaseSettings):
   # App configuration
@@ -7,8 +9,11 @@ class Settings(BaseSettings):
   BASE_URL: str
     
   # Security and JWT configuration
-  SECRET_KEY: str
-  ALGORITHM: str
+  SECRET_KEY: str = Field(min_length=32)
+  ALGORITHM: Literal["HS256"] = "HS256"
+  JWT_ISSUER: str = "community-app-backend"
+  JWT_AUDIENCE: str = "community-app-clients"
+  JWT_LEEWAY_SECONDS: int = 5
   ACCESS_TOKEN_EXPIRE_MINUTES: int
   REFRESH_TOKEN_EXPIRE_DAYS: int
 

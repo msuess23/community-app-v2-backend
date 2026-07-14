@@ -12,12 +12,14 @@ class DomainException(Exception):
     message: str, 
     error_code: str = "INTERNAL_SERVER_ERROR", 
     status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
-    details: Optional[Dict[str, Any]] = None
+    details: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None
   ):
     self.message = message
     self.error_code = error_code
     self.status_code = status_code
     self.details = details
+    self.headers = headers
     super().__init__(self.message)
 
 class ResourceNotFoundException(DomainException):
@@ -29,14 +31,29 @@ class ResourceNotFoundException(DomainException):
       status_code=status.HTTP_404_NOT_FOUND
     )
 
-class UnauthorizedException(DomainException):
-  """Thrown for missing or invalid authentication/authorization."""
-  def __init__(self, message: str = "You are not authorized to perform this action."):
+class AuthenticationException(DomainException):
+  """Thrown when authentication credentials are missing or invalid."""
+  def __init__(self, message: str = "Could not validate credentials."):
     super().__init__(
       message=message,
-      error_code="UNAUTHORIZED",
-      status_code=status.HTTP_401_UNAUTHORIZED
+      error_code="AUTHENTICATION_FAILED",
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      headers={"WWW-Authenticate": "Bearer"}
     )
+
+
+class ForbiddenException(DomainException):
+  """Thrown when an authenticated user lacks the required permission."""
+  def __init__(self, message: str = "You are not allowed to perform this action."):
+    super().__init__(
+      message=message,
+      error_code="FORBIDDEN",
+      status_code=status.HTTP_403_FORBIDDEN
+    )
+
+
+# Temporary compatibility alias for modules that have not yet been refactored.
+UnauthorizedException = AuthenticationException
 
 class WorkflowValidationException(DomainException):
   """Thrown when a ticket/appointment workflow operation violates business rules."""
@@ -64,5 +81,6 @@ async def domain_exception_handler(request: Request, exc: DomainException) -> JS
     
   return JSONResponse(
     status_code=exc.status_code,
-    content=content
+    content=content,
+    headers=exc.headers
   )

@@ -1,16 +1,18 @@
-from fastapi import APIRouter, Depends, Body, Request, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Body, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 
 from src.core.config import settings
 from src.core.database import get_db
-from src.core.security import verify_password, create_access_token, create_refresh_token
+from src.core.security import (
+  create_access_token,
+  create_refresh_token,
+  verify_and_update_password,
+)
 from src.core.exceptions import UnauthorizedException
-from src.core.limiter import limiter
 
 from src.user.repository import UserRepository
 from src.auth.service import AuthService
-from src.auth.models import BlacklistedToken
 from src.user.schemas import UserCreate, UserResponse
 from src.auth.schemas import TokenResponse, ForgotPasswordRequest, ResetPasswordRequest
 
@@ -27,25 +29,39 @@ async def register(
 
 
 @router.post("/login", response_model=TokenResponse)
-@limiter.limit("5/minute")
 async def login(
-  request: Request,
   form_data: OAuth2PasswordRequestForm = Depends(),
   db: AsyncSession = Depends(get_db)
 ):
   """Authenticates a user and returns JWT tokens."""
   user = await UserRepository.get_by_email(db, email=form_data.username)
-  if not user or not verify_password(form_data.password, user.hashed_password):
+  if not user:
     raise UnauthorizedException("Incorrect email or password")
-  
+
+  password_valid, updated_hash = verify_and_update_password(
+    form_data.password,
+    user.hashed_password,
+  )
+  if not password_valid or not user.is_active:
+    raise UnauthorizedException("Incorrect email or password")
+
+  if updated_hash is not None:
+    user.hashed_password = updated_hash
+    await db.commit()
+
   return TokenResponse(
-    access_token=create_access_token(subject=user.id),
-    refresh_token=create_refresh_token(subject=user.id)
+    access_token=create_access_token(
+      subject=user.id,
+      auth_version=user.auth_version,
+    ),
+    refresh_token=create_refresh_token(
+      subject=user.id,
+      auth_version=user.auth_version,
+    ),
   )
 
 
 @router.post("/forgot-password-request")
-@limiter.limit("5/minute")
 async def forgot_password_request(
   request: ForgotPasswordRequest, 
   background_tasks: BackgroundTasks,
@@ -56,7 +72,6 @@ async def forgot_password_request(
   return {"message": "If this email exists, an OTP has been sent."}
 
 @router.post("/reset-password")
-@limiter.limit("5/minute")
 async def reset_password(
   request: ResetPasswordRequest,
   db: AsyncSession = Depends(get_db)

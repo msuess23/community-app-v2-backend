@@ -14,7 +14,8 @@ pydantic[email]>=2.6.0      # Email validation
 pydantic-settings>=2.1.0    # Env Variables
 
 # --- Security & Authentication ---
-bcrypt>=4.1.2               # PW Hashing
+pwdlib[argon2]>=0.3.0       # Password hashing (new Argon2 hashes)
+bcrypt>=4.1.2               # Temporary: verify and migrate existing bcrypt hashes
 PyJWT>=2.8.0                # Tokens
 
 # --- Support ---

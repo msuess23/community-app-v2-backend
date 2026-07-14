@@ -7,6 +7,7 @@ from src.user.models import User, UserHistory, Role
 from src.user.schemas import UserUpdate, AdminUserUpdate
 from src.core.exceptions import DomainException
 from src.core.filters import LifecycleStatusFilter
+from src.core.security import create_unusable_password_hash
 from src.user.repository import UserRepository
 
 class UserService:
@@ -99,10 +100,11 @@ class UserService:
       
     user.is_active = False
     user.deactivated_at = datetime.now(timezone.utc)
-    user.email = f"deleted@local.com"
+    user.email = f"deleted+{user.id}@users.invalid"
     user.first_name = "gelöschter"
     user.last_name = "Nutzer"
-    user.hashed_password = "UNUSABLE_PASSWORD"
+    user.hashed_password = create_unusable_password_hash()
+    user.auth_version += 1
     
     history_entry = UserHistory(
       user_id=user.id,
