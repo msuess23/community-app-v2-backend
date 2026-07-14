@@ -6,7 +6,10 @@ from typing import Optional, Union
 
 from src.user.models import User, UserHistory, Role
 from src.user.schemas import UserUpdate, AdminUserUpdate
-from src.core.exceptions import DomainException
+from src.core.exceptions import (
+  ConflictException,
+  ResourceNotFoundException,
+)
 from src.core.filters import LifecycleStatusFilter
 from src.core.security import create_unusable_password_hash
 from src.auth.models import RefreshSessionRevokeReason
@@ -35,7 +38,10 @@ class UserService:
     Accepts different update schemas based on the requester's role.
     """
     if getattr(user, "is_active", True) is False:
-      raise DomainException("Cannot update a deactivated user profile.", status_code=400)
+      raise ConflictException(
+        "Cannot update a deactivated user profile.",
+        error_code="USER_DEACTIVATED",
+      )
 
     update_dict = update_data.model_dump(exclude_unset=True)
     
@@ -58,8 +64,7 @@ class UserService:
     UserRepository.add(db, user)
     UserRepository.add_history(db, history_entry)
     
-    await db.commit()
-    await db.refresh(user)
+    await db.flush()
     return user
 
   @staticmethod
@@ -117,7 +122,10 @@ class UserService:
     """Retrieves a specific user and ensures existence."""
     user = await UserRepository.get_by_id(db, user_id)
     if not user:
-      raise DomainException("User not found", status_code=404)
+      raise ResourceNotFoundException(
+        "User not found",
+        error_code="USER_NOT_FOUND",
+      )
     return user
 
   @staticmethod
@@ -131,7 +139,10 @@ class UserService:
     UserPolicy.require_can_deactivate(actor, user)
 
     if not user.is_active:
-      raise DomainException("User is already deactivated", status_code=400)
+      raise ConflictException(
+        "User is already deactivated",
+        error_code="USER_ALREADY_DEACTIVATED",
+      )
       
     user.is_active = False
     user.deactivated_at = datetime.now(timezone.utc)
@@ -158,7 +169,6 @@ class UserService:
       user.id,
       RefreshSessionRevokeReason.ACCOUNT_DEACTIVATED,
     )
-    await db.commit()
 
   @staticmethod
   async def run_deep_anonymization(db: AsyncSession):
@@ -177,7 +187,6 @@ class UserService:
       cutoff_officer,
     )
     
-    await db.commit()
     logger.info("Deep anonymization completed", extra={"completed_at": now.isoformat()})
 
 

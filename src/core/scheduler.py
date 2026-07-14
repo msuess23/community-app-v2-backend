@@ -1,32 +1,40 @@
+import logging
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from src.core.database import AsyncSessionLocal
+
+from src.core.database import transactional_session
 from src.user.service import UserService
 
-# Initialize global background scheduler
+
+logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
-async def anonymization_cron_task():
-  """
-  Instantiates a database session and triggers the scheduled anonymization service.
-  """
-  async with AsyncSessionLocal() as db:
-    try:
+
+async def anonymization_cron_task() -> None:
+  """Execute deep anonymization within one atomic transaction."""
+  try:
+    async with transactional_session() as db:
       await UserService.run_deep_anonymization(db)
-    except Exception as e:
-      print(f"Error executing deep anonymization cron task: {e}")
+  except Exception:
+    logger.exception("Deep anonymization cron task failed")
 
-def setup_scheduler():
-  """
-  Configures and starts the background scheduler.
-  """
-  # Configure the task to run daily at 03:00 AM
-  scheduler.add_job(anonymization_cron_task, 'cron', hour=3, minute=0)
+
+def setup_scheduler() -> None:
+  """Configure and start the process-local scheduler."""
+  scheduler.add_job(
+    anonymization_cron_task,
+    "cron",
+    hour=3,
+    minute=0,
+    id="deep-anonymization",
+    replace_existing=True,
+  )
   scheduler.start()
-  print("Background scheduler started successfully.")
+  logger.info("Background scheduler started")
 
-def shutdown_scheduler():
-  """
-  Ensures clean shutdown of the background scheduler.
-  """
-  scheduler.shutdown()
-  print("Background scheduler terminated.")
+
+def shutdown_scheduler() -> None:
+  """Stop the scheduler when it is running."""
+  if scheduler.running:
+    scheduler.shutdown()
+    logger.info("Background scheduler stopped")

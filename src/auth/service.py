@@ -14,7 +14,12 @@ from src.auth.repository import AuthRepository
 from src.auth.schemas import ResetPasswordRequest, TokenResponse
 from src.core.config import settings
 from src.core.email import send_otp_email, send_password_changed_email
-from src.core.exceptions import AuthenticationException, DomainException
+from src.core.database import commit_and_raise
+from src.core.exceptions import (
+  AuthenticationException,
+  BadRequestException,
+  ConflictException,
+)
 from src.core.security import (
   TokenType,
   TokenValidationError,
@@ -49,10 +54,9 @@ class AuthService:
     """Validate input, create a user, and append the initial audit entry."""
     existing_user = await UserRepository.get_by_email(db, user_data.email)
     if existing_user:
-      raise DomainException(
+      raise ConflictException(
         "Email already registered",
-        error_code="EMAIL_EXISTS",
-        status_code=400,
+        error_code="EMAIL_ALREADY_REGISTERED",
       )
 
     new_user = User(
@@ -76,8 +80,7 @@ class AuthService:
     )
     UserRepository.add_history(db, history_entry)
 
-    await db.commit()
-    await db.refresh(new_user)
+    await db.flush()
     return new_user
 
   @staticmethod
@@ -127,7 +130,6 @@ class AuthService:
       ),
     )
 
-    await db.commit()
 
     return TokenResponse(
       access_token=access_token,
@@ -174,14 +176,17 @@ class AuthService:
           RefreshSessionRevokeReason.REUSE_DETECTED,
           revoked_at=now,
         )
-        await db.commit()
+        commit_and_raise(
+          AuthenticationException("Refresh session is no longer valid")
+        )
       raise AuthenticationException("Refresh session is no longer valid")
 
     if session.expires_at <= now:
       session.revoked_at = now
       session.revoke_reason = RefreshSessionRevokeReason.EXPIRED.value
-      await db.commit()
-      raise AuthenticationException("Refresh session has expired")
+      commit_and_raise(
+        AuthenticationException("Refresh session has expired")
+      )
 
     user = await db.get(User, claims.sub)
     if (
@@ -195,8 +200,9 @@ class AuthService:
         RefreshSessionRevokeReason.AUTH_VERSION_CHANGED,
         revoked_at=now,
       )
-      await db.commit()
-      raise AuthenticationException("Refresh session is no longer valid")
+      commit_and_raise(
+        AuthenticationException("Refresh session is no longer valid")
+      )
 
     # Keep the family's original absolute expiry. Rotation does not create an
     # indefinitely renewable login session.
@@ -229,8 +235,6 @@ class AuthService:
       subject=user.id,
       auth_version=user.auth_version,
     )
-    await db.commit()
-
     return TokenResponse(
       access_token=access_token,
       refresh_token=replacement_token.value,
@@ -271,7 +275,6 @@ class AuthService:
       existing_reset is not None
       and existing_reset.requested_at > cooldown_before
     ):
-      await db.rollback()
       return
 
     otp_code = "".join(secrets.choice(string.digits) for _ in range(6))
@@ -285,8 +288,6 @@ class AuthService:
       requested_at=now,
       cooldown_before=cooldown_before,
     )
-    await db.commit()
-
     if accepted:
       background_tasks.add_task(send_otp_email, user.email, otp_code)
 
@@ -317,16 +318,14 @@ class AuthService:
 
     if reset_record.expires_at <= now:
       await AuthRepository.delete_password_reset_by_id(db, reset_record.id)
-      await db.commit()
-      raise AuthService._invalid_password_reset()
+      commit_and_raise(AuthService._invalid_password_reset())
 
     if reset_record.failed_attempts >= settings.PASSWORD_RESET_MAX_ATTEMPTS:
       raise AuthService._invalid_password_reset()
 
     if not verify_password(data.otp, reset_record.otp_hash):
       reset_record.failed_attempts += 1
-      await db.commit()
-      raise AuthService._invalid_password_reset()
+      commit_and_raise(AuthService._invalid_password_reset())
 
     user.hashed_password = get_password_hash(data.new_password)
     user.auth_version += 1
@@ -338,16 +337,14 @@ class AuthService:
       revoked_at=now,
     )
     await AuthRepository.delete_password_reset_by_id(db, reset_record.id)
-    await db.commit()
 
     background_tasks.add_task(send_password_changed_email, user.email)
 
   @staticmethod
-  def _invalid_password_reset() -> DomainException:
-    return DomainException(
+  def _invalid_password_reset() -> BadRequestException:
+    return BadRequestException(
       _INVALID_RESET_MESSAGE,
       error_code="PASSWORD_RESET_INVALID",
-      status_code=400,
     )
 
   @staticmethod
@@ -380,4 +377,3 @@ class AuthService:
       session.family_id,
       RefreshSessionRevokeReason.LOGOUT,
     )
-    await db.commit()

@@ -1,38 +1,88 @@
-from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
+from typing import NoReturn
+
+from sqlalchemy.ext.asyncio import (
+  AsyncSession,
+  async_sessionmaker,
+  create_async_engine,
+)
 from sqlalchemy.orm import declarative_base
 
 from src.core.config import settings
+from src.core.exceptions import DomainException
 
-# Create async engine for PostgreSQL
+
 engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=30,
-    pool_recycle=1800
+  settings.DATABASE_URL,
+  echo=False,
+  pool_size=10,
+  max_overflow=20,
+  pool_timeout=30,
+  pool_recycle=1800,
 )
 
-# Configure session factory
 AsyncSessionLocal = async_sessionmaker(
   bind=engine,
   class_=AsyncSession,
   expire_on_commit=False,
-  autocommit=False,
   autoflush=False,
 )
 
-# Base class for ORM models
 Base = declarative_base()
 
-# FastAPI dependency for DB sessions
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+
+class _CommitAndRaise(Exception):
+  """Internal signal for security state that must persist before an error."""
+
+  def __init__(self, public_error: DomainException) -> None:
+    self.public_error = public_error
+    super().__init__(str(public_error))
+
+
+def commit_and_raise(error: DomainException) -> NoReturn:
+  """
+  Persist the current unit of work and then expose an expected domain error.
+
+  This is intentionally narrow. It is used for security state such as a failed
+  OTP-attempt counter or refresh-token replay revocation, where rolling back the
+  mutation would make the protection ineffective.
+  """
+  raise _CommitAndRaise(error)
+
+
+@asynccontextmanager
+async def transactional_session() -> AsyncIterator[AsyncSession]:
+  """
+  Provide exactly one transaction boundary for a complete application use case.
+
+  Repositories and services stage work only. A successful caller is committed
+  once; every ordinary exception rolls the complete transaction back.
+  """
   async with AsyncSessionLocal() as session:
     try:
       yield session
-    except Exception:
+    except _CommitAndRaise as signal:
+      try:
+        await session.commit()
+      except BaseException:
+        await session.rollback()
+        raise
+      raise signal.public_error
+    except BaseException:
       await session.rollback()
       raise
-    finally:
-      await session.close()
+    else:
+      try:
+        await session.commit()
+      except BaseException:
+        await session.rollback()
+        raise
+
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+  """FastAPI dependency exposing the request-scoped transactional session."""
+  async with transactional_session() as session:
+    yield session

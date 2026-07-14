@@ -3,7 +3,10 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, Tuple
 
-from src.core.exceptions import DomainException
+from src.core.exceptions import (
+  ConflictException,
+  ResourceNotFoundException,
+)
 from src.office.models import Office, OfficeHistory
 from src.office.schemas import OfficeCreate, OfficeUpdate
 from src.office.repository import OfficeRepository
@@ -49,7 +52,10 @@ class OfficeService:
     """
     office = await OfficeRepository.get_by_id(db, office_id)
     if not office:
-      raise DomainException("Office not found", status_code=404)
+      raise ResourceNotFoundException(
+        "Office not found",
+        error_code="OFFICE_NOT_FOUND",
+      )
     return office
 
 
@@ -77,7 +83,7 @@ class OfficeService:
       phone=office_data.phone,
       services=office_data.services,
       opening_hours=office_data.opening_hours.model_dump(exclude_unset=True) if office_data.opening_hours else {},
-      address_id=address_entity.id if address_entity else None
+      address=address_entity,
     )
     
     OfficeRepository.add(db, new_office)
@@ -98,8 +104,7 @@ class OfficeService:
     
     OfficeRepository.add_history(db, history_entry)
     
-    await db.commit()
-    await db.refresh(new_office)
+    await db.flush()
     
     return new_office
 
@@ -115,7 +120,10 @@ class OfficeService:
     Applies updates to an office and records a history snapshot.
     """
     if not office.is_active:
-      raise DomainException("Cannot update a deactivated office.", status_code=400)
+      raise ConflictException(
+        "Cannot update a deactivated office.",
+        error_code="OFFICE_DEACTIVATED",
+      )
 
     update_dict = update_data.model_dump(exclude_unset=True)
     if not update_dict:
@@ -124,7 +132,10 @@ class OfficeService:
     if "name" in update_dict and update_dict["name"] != office.name:
       existing_office = await OfficeRepository.get_by_name(db, update_dict["name"])
       if existing_office:
-        raise DomainException("An office with this name already exists", status_code=400)
+        raise ConflictException(
+          "An office with this name already exists",
+          error_code="OFFICE_NAME_ALREADY_EXISTS",
+        )
 
     if update_data.address:
       if office.address:
@@ -133,7 +144,7 @@ class OfficeService:
         new_address = AddressService.create_address_entity(update_data.address)
         db.add(new_address)
         await db.flush()
-        office.address_id = new_address.id
+        office.address = new_address
 
     for key, value in update_dict.items():
       if key != "address":
@@ -154,8 +165,7 @@ class OfficeService:
     
     OfficeRepository.add(db, office)
     OfficeRepository.add_history(db, history_entry)
-    await db.commit()
-    await db.refresh(office)
+    await db.flush()
     return office
 
 
@@ -171,7 +181,10 @@ class OfficeService:
     office = await OfficeService.get_office_by_id(db, office_id)
     
     if not office.is_active:
-      raise DomainException("Office is already deactivated", status_code=400)
+      raise ConflictException(
+        "Office is already deactivated",
+        error_code="OFFICE_ALREADY_DEACTIVATED",
+      )
       
     office.is_active = False
     office.deactivated_at = datetime.now(timezone.utc)
@@ -187,7 +200,6 @@ class OfficeService:
     
     OfficeRepository.add(db, office)
     OfficeRepository.add_history(db, history_entry)
-    await db.commit()
 
 
   @staticmethod
