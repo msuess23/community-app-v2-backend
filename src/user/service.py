@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +11,11 @@ from src.core.filters import LifecycleStatusFilter
 from src.core.security import create_unusable_password_hash
 from src.auth.models import RefreshSessionRevokeReason
 from src.auth.repository import AuthRepository
+from src.user.policies import UserPolicy
 from src.user.repository import UserRepository
+
+logger = logging.getLogger(__name__)
+
 
 class UserService:
   """
@@ -58,6 +63,27 @@ class UserService:
     return user
 
   @staticmethod
+  async def update_user_by_admin(
+    db: AsyncSession,
+    *,
+    actor: User,
+    target_user: User,
+    update_data: AdminUserUpdate,
+  ) -> User:
+    """Authorize and execute an administrative user update."""
+    UserPolicy.require_can_admin_update(
+      actor,
+      target_user,
+      new_role=update_data.role,
+    )
+    return await UserService.update_user_profile(
+      db,
+      target_user,
+      update_data,
+      actor.id,
+    )
+
+  @staticmethod
   async def get_all_users(
     db: AsyncSession, 
     current_user: User,
@@ -71,14 +97,19 @@ class UserService:
     """
     Retrieves users while enforcing strict data minimization and isolation rules.
     """
-    # Citizens should not be listed in bulk unless requested by an Admin
-    exclude_citizens = current_user.role != Role.ADMIN
-    
-    # Officers are restricted to their own office namespace
-    force_office_id = current_user.office_id if current_user.role == Role.OFFICER else None
-    
+    scope = UserPolicy.resolve_read_scope(
+      current_user,
+      requested_office_id=office_id,
+      requested_role=role,
+      requested_status=status,
+    )
+
     return await UserRepository.get_all(
-      db, skip, limit, office_id, role, exclude_citizens, force_office_id, status, search
+      db,
+      scope,
+      skip=skip,
+      limit=limit,
+      search=search,
     )
 
   @staticmethod
@@ -90,13 +121,15 @@ class UserService:
     return user
 
   @staticmethod
-  async def deactivate_user(db: AsyncSession, user_id: uuid.UUID, admin_id: uuid.UUID):
+  async def deactivate_user(db: AsyncSession, user_id: uuid.UUID, actor: User):
     """
     Deactivates a user account and applies immediate Stage 1 anonymization 
     to protect live data exposure.
     """
     user = await UserService.get_user_by_id(db, user_id)
     
+    UserPolicy.require_can_deactivate(actor, user)
+
     if not user.is_active:
       raise DomainException("User is already deactivated", status_code=400)
       
@@ -114,7 +147,7 @@ class UserService:
       first_name=user.first_name,
       last_name=user.last_name,
       role=user.role,
-      changed_by_user_id=admin_id,
+      changed_by_user_id=actor.id,
       change_reason="User deactivated by Administrator"
     )
     
@@ -138,10 +171,14 @@ class UserService:
     cutoff_officer = now - timedelta(days=3650)
     
     await UserRepository.bulk_anonymize_history(db, [Role.CITIZEN], cutoff_citizen)
-    await UserRepository.bulk_anonymize_history(db, [Role.OFFICER, Role.MANAGER, Role.ADMIN], cutoff_officer)
+    await UserRepository.bulk_anonymize_history(
+      db,
+      [Role.DISPATCHER, Role.OFFICER, Role.MANAGER, Role.ADMIN],
+      cutoff_officer,
+    )
     
     await db.commit()
-    print(f"[{now.isoformat()}] Cron task: Deep anonymization completed successfully.")
+    logger.info("Deep anonymization completed", extra={"completed_at": now.isoformat()})
 
 
   @staticmethod

@@ -6,7 +6,8 @@ from sqlalchemy import update
 from datetime import datetime
 
 from src.user.models import User, UserHistory, Role
-from src.core.filters import LifecycleStatusFilter, apply_lifecycle_filter, apply_search_filter
+from src.core.filters import apply_lifecycle_filter, apply_search_filter
+from src.user.policies import UserReadScope
 
 class UserRepository:
   """
@@ -41,43 +42,25 @@ class UserRepository:
 
   @staticmethod
   async def get_all(
-    db: AsyncSession, 
-    skip: int = 0, 
+    db: AsyncSession,
+    scope: UserReadScope,
+    skip: int = 0,
     limit: int = 100,
-    office_id: Optional[uuid.UUID] = None,
-    role: Optional[Role] = None,
-    exclude_citizens: bool = False,
-    force_office_id: Optional[uuid.UUID] = None,
-    status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
     search: Optional[str] = None
   ) -> List[User]:
-    """
-    Retrieves users with dynamic filtering.
-    Applies security policies provided by the service layer (isolation and data minimization).
-    """
+    """Retrieve users inside an already-authorized visibility scope."""
     query = select(User)
-
-    # Lifecycle filter
-    query = apply_lifecycle_filter(query, User, status)
-
-    # Text Search
+    query = apply_lifecycle_filter(query, User, scope.status)
     query = apply_search_filter(query, search, User.email, User.first_name, User.last_name)
-    
-    # Office & Role Filter
-    if office_id:
-      query = query.where(User.office_id == office_id)
-    if role:
-      query = query.where(User.role == role)
-      
-    # Filter out citizens
-    if exclude_citizens:
+
+    if scope.office_id is not None:
+      query = query.where(User.office_id == scope.office_id)
+    if scope.role is not None:
+      query = query.where(User.role == scope.role)
+    if scope.exclude_citizens:
       query = query.where(User.role != Role.CITIZEN)
-      
-    # Apply Tenant Isolation constraints
-    if force_office_id:
-      query = query.where(User.office_id == force_office_id)
-      
-    query = query.order_by(User.last_name).offset(skip).limit(limit)
+
+    query = query.order_by(User.last_name, User.first_name, User.id).offset(skip).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()
 

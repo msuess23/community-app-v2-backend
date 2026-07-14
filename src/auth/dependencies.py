@@ -1,7 +1,6 @@
-import uuid
 from collections.abc import Iterable
 
-from fastapi import Depends, Path
+from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,20 +47,3 @@ def role_required(allowed_roles: Iterable[Role | str]):
         return current_user
 
     return guard
-
-
-async def get_target_user_if_allowed(
-    user_id: uuid.UUID = Path(...),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    if current_user.id == user_id:
-        return current_user
-
-    if current_user.role is Role.CITIZEN:
-        raise ForbiddenException("You do not have permission to access this resource.")
-
-    # The detailed office/role policy is handled in the separate S-2 refactor.
-    from src.user.service import UserService
-
-    return await UserService.get_user_by_id(db, user_id)

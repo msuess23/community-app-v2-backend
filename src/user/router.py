@@ -5,7 +5,8 @@ import uuid
 from datetime import datetime
 
 from src.core.database import get_db
-from src.auth.dependencies import get_current_user, role_required, get_target_user_if_allowed
+from src.auth.dependencies import get_current_user, role_required
+from src.user.dependencies import get_target_user_if_allowed
 from src.user.models import User, Role
 from src.user.schemas import UserResponse, UserUpdate, AdminUserUpdate, UserHistoryResponse
 from src.user.service import UserService
@@ -75,7 +76,12 @@ async def update_user_by_admin(
   Strictly restricted to administrators.
   """
   target_user = await UserService.get_user_by_id(db, user_id)
-  return await UserService.update_user_profile(db, target_user, update_data, current_user.id)
+  return await UserService.update_user_by_admin(
+    db,
+    actor=current_user,
+    target_user=target_user,
+    update_data=update_data,
+  )
 
 
 @router.delete("/{user_id}", status_code=204)
@@ -87,7 +93,7 @@ async def deactivate_user(
   """
   Soft-deletes (deactivates) a user and scrubs their live data.
   """
-  await UserService.deactivate_user(db, user_id, current_user.id)
+  await UserService.deactivate_user(db, user_id, current_user)
 
 
 @router.get("/{user_id}/history", response_model=List[UserHistoryResponse])
