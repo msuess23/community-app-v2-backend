@@ -1,7 +1,7 @@
 import uuid
 from dataclasses import dataclass
 
-from src.core.exceptions import ForbiddenException
+from src.core.exceptions import DomainValidationException, ForbiddenException
 from src.core.filters import LifecycleStatusFilter
 from src.user.models import Role, User
 
@@ -28,6 +28,38 @@ class UserReadScope:
     if self.role is not None and target.role != self.role:
       return False
     return True
+
+
+class UserAssignmentPolicy:
+  """Pure role/office invariants shared by services and unit tests."""
+
+  _OFFICE_ROLES = frozenset({Role.DISPATCHER, Role.OFFICER, Role.MANAGER})
+  _OFFICELESS_ROLES = frozenset({Role.CITIZEN, Role.ADMIN})
+
+  @classmethod
+  def validate_shape(
+    cls,
+    *,
+    role: Role,
+    office_id: uuid.UUID | None,
+  ) -> None:
+    if role in cls._OFFICE_ROLES and office_id is None:
+      raise DomainValidationException(
+        "Staff accounts must be assigned to an office.",
+        error_code="USER_OFFICE_REQUIRED",
+        details={"field": "office_id", "role": role.value},
+      )
+
+    if role in cls._OFFICELESS_ROLES and office_id is not None:
+      raise DomainValidationException(
+        "Citizen and administrator accounts cannot be assigned to an office.",
+        error_code="USER_OFFICE_NOT_ALLOWED",
+        details={"field": "office_id", "role": role.value},
+      )
+
+  @classmethod
+  def requires_office(cls, role: Role) -> bool:
+    return role in cls._OFFICE_ROLES
 
 
 class UserPolicy:

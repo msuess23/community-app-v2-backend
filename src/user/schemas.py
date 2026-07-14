@@ -1,17 +1,46 @@
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
-from typing import Optional
-from uuid import UUID
 from datetime import datetime
+from typing import Annotated, Optional
+from uuid import UUID
 
-from src.user.models import Role
+from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
+
+from src.core.normalization import normalize_email
 from src.core.schemas import BaseMetadataResponse
 from src.core.validation import PasswordValue
+from src.user.models import Role
+
+
+NormalizedEmail = Annotated[EmailStr, BeforeValidator(normalize_email)]
+ChangeReason = Annotated[
+  str,
+  Field(
+    min_length=3,
+    max_length=500,
+    description="Fachliche Begründung der administrativen Änderung",
+  ),
+]
+
 
 class UserCreate(BaseModel):
-  email: EmailStr
+  """Public citizen registration payload."""
+
+  email: NormalizedEmail
   password: PasswordValue
   first_name: str = Field(..., min_length=2)
   last_name: str = Field(..., min_length=2)
+
+
+class AdminUserCreate(BaseModel):
+  """Administrative account creation, including role and office assignment."""
+
+  email: NormalizedEmail
+  password: PasswordValue
+  first_name: str = Field(..., min_length=2)
+  last_name: str = Field(..., min_length=2)
+  role: Role
+  office_id: Optional[UUID] = None
+  change_reason: ChangeReason
+
 
 class UserResponse(BaseMetadataResponse):
   id: UUID
@@ -20,23 +49,30 @@ class UserResponse(BaseMetadataResponse):
   last_name: str
   role: Role
   office_id: Optional[UUID] = None
-  
+
   model_config = ConfigDict(from_attributes=True)
 
+
 class UserUpdate(BaseModel):
-  """
-  Fields that a standard user is allowed to update on their own profile.
-  """
+  """Fields a user may change on their own profile plus an audit reason."""
+
   first_name: Optional[str] = Field(None, min_length=2)
   last_name: Optional[str] = Field(None, min_length=2)
+  change_reason: ChangeReason
 
-class AdminUserUpdate(UserUpdate):
-  """
-  Fields that an administrator is allowed to update on any user profile.
-  Inherits from UserUpdate to include first_name and last_name.
-  """
+
+class AdminUserUpdate(BaseModel):
+  """Administrative partial update command for a user account."""
+
+  first_name: Optional[str] = Field(None, min_length=2)
+  last_name: Optional[str] = Field(None, min_length=2)
   role: Optional[Role] = None
   office_id: Optional[UUID] = None
+  change_reason: ChangeReason
+
+
+class UserDeactivate(BaseModel):
+  change_reason: ChangeReason
 
 
 class UserHistoryResponse(BaseModel):
@@ -46,7 +82,12 @@ class UserHistoryResponse(BaseModel):
   first_name: str
   last_name: str
   role: Role
+  office_id: Optional[UUID] = None
+  is_active: bool
+  deactivated_at: Optional[datetime] = None
   changed_by_user_id: UUID
   change_reason: str
-  changed_at: datetime
+  valid_from: datetime
+  valid_to: Optional[datetime] = None
+
   model_config = ConfigDict(from_attributes=True)

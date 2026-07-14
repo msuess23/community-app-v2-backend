@@ -1,71 +1,155 @@
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, Union
+from typing import Optional
 
-from src.user.models import User, UserHistory, Role
-from src.user.schemas import UserUpdate, AdminUserUpdate
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.auth.models import RefreshSessionRevokeReason
+from src.auth.repository import AuthRepository
 from src.core.exceptions import (
   ConflictException,
+  DomainValidationException,
   ResourceNotFoundException,
 )
 from src.core.filters import LifecycleStatusFilter
-from src.core.security import create_unusable_password_hash
-from src.auth.models import RefreshSessionRevokeReason
-from src.auth.repository import AuthRepository
-from src.user.policies import UserPolicy
+from src.core.normalization import normalize_email
+from src.core.security import create_unusable_password_hash, get_password_hash
+from src.office.repository import OfficeRepository
+from src.user.audit import build_user_history
+from src.user.models import Role, User, UserHistory
+from src.user.persistence import UserPersistence
+from src.user.policies import UserAssignmentPolicy, UserPolicy
 from src.user.repository import UserRepository
+from src.user.schemas import AdminUserCreate, AdminUserUpdate, UserUpdate
+
 
 logger = logging.getLogger(__name__)
 
 
 class UserService:
-  """
-  Handles business logic for user management.
-  Enforces permissions, data minimization, and coordinates the unit of work.
-  """
-  
+  """Business logic for users, assignments, and temporal audit versions."""
+
+  @staticmethod
+  async def _get_locked_user(db: AsyncSession, user_id: uuid.UUID) -> User:
+    user = await UserPersistence.get_by_id_for_update(db, user_id)
+    if user is None:
+      raise ResourceNotFoundException(
+        "User not found",
+        error_code="USER_NOT_FOUND",
+      )
+    return user
+
+  @staticmethod
+  async def _validate_assignment(
+    db: AsyncSession,
+    *,
+    role: Role,
+    office_id: uuid.UUID | None,
+  ) -> None:
+    UserAssignmentPolicy.validate_shape(role=role, office_id=office_id)
+    if not UserAssignmentPolicy.requires_office(role):
+      return
+
+    office = await OfficeRepository.get_by_id(db, office_id)
+    if office is None:
+      raise DomainValidationException(
+        "The selected office does not exist.",
+        error_code="USER_OFFICE_NOT_FOUND",
+        details={"field": "office_id"},
+      )
+    if not office.is_active:
+      raise DomainValidationException(
+        "Staff accounts cannot be assigned to an inactive office.",
+        error_code="USER_OFFICE_INACTIVE",
+        details={"field": "office_id"},
+      )
+
+  @staticmethod
+  async def create_user_by_admin(
+    db: AsyncSession,
+    *,
+    actor: User,
+    user_data: AdminUserCreate,
+  ) -> User:
+    email = normalize_email(user_data.email)
+    if await UserRepository.get_by_email(db, email):
+      raise ConflictException(
+        "Email already registered",
+        error_code="EMAIL_ALREADY_REGISTERED",
+      )
+
+    await UserService._validate_assignment(
+      db,
+      role=user_data.role,
+      office_id=user_data.office_id,
+    )
+
+    now = datetime.now(timezone.utc)
+    new_user = User(
+      email=email,
+      hashed_password=get_password_hash(user_data.password),
+      first_name=user_data.first_name,
+      last_name=user_data.last_name,
+      role=user_data.role,
+      office_id=user_data.office_id,
+      created_at=now,
+    )
+    UserRepository.add(db, new_user)
+    await db.flush()
+    UserRepository.add_history(
+      db,
+      build_user_history(
+        new_user,
+        actor_id=actor.id,
+        change_reason=user_data.change_reason,
+        valid_from=now,
+      ),
+    )
+    await db.flush()
+    return new_user
+
   @staticmethod
   async def update_user_profile(
-    db: AsyncSession, 
-    user: User, 
-    update_data: Union[UserUpdate, AdminUserUpdate], 
-    changed_by_user_id: uuid.UUID
+    db: AsyncSession,
+    user: User,
+    update_data: UserUpdate,
+    changed_by_user_id: uuid.UUID,
   ) -> User:
-    """
-    Applies updates to a user profile and logs the change in the history table.
-    Accepts different update schemas based on the requester's role.
-    """
-    if getattr(user, "is_active", True) is False:
+    locked_user = await UserService._get_locked_user(db, user.id)
+    if not locked_user.is_active:
       raise ConflictException(
         "Cannot update a deactivated user profile.",
         error_code="USER_DEACTIVATED",
       )
 
-    update_dict = update_data.model_dump(exclude_unset=True)
-    
-    if not update_dict:
-      return user 
-      
-    for key, value in update_dict.items():
-      setattr(user, key, value)
-      
-    history_entry = UserHistory(
-      user_id=user.id,
-      email=user.email,
-      first_name=user.first_name,
-      last_name=user.last_name,
-      role=user.role,
-      changed_by_user_id=changed_by_user_id,
-      change_reason="User profile updated via API"
+    changes = update_data.model_dump(
+      exclude_unset=True,
+      exclude={"change_reason"},
     )
-    
-    UserRepository.add(db, user)
-    UserRepository.add_history(db, history_entry)
-    
+    if not changes:
+      return locked_user
+
+    now = datetime.now(timezone.utc)
+    await UserPersistence.close_current_history(
+      db,
+      locked_user.id,
+      valid_to=now,
+    )
+    for key, value in changes.items():
+      setattr(locked_user, key, value)
+
+    UserRepository.add_history(
+      db,
+      build_user_history(
+        locked_user,
+        actor_id=changed_by_user_id,
+        change_reason=update_data.change_reason,
+        valid_from=now,
+      ),
+    )
     await db.flush()
-    return user
+    return locked_user
 
   @staticmethod
   async def update_user_by_admin(
@@ -75,40 +159,72 @@ class UserService:
     target_user: User,
     update_data: AdminUserUpdate,
   ) -> User:
-    """Authorize and execute an administrative user update."""
     UserPolicy.require_can_admin_update(
       actor,
       target_user,
       new_role=update_data.role,
     )
-    return await UserService.update_user_profile(
-      db,
-      target_user,
-      update_data,
-      actor.id,
+
+    locked_user = await UserService._get_locked_user(db, target_user.id)
+    if not locked_user.is_active:
+      raise ConflictException(
+        "Cannot update a deactivated user profile.",
+        error_code="USER_DEACTIVATED",
+      )
+
+    changes = update_data.model_dump(
+      exclude_unset=True,
+      exclude={"change_reason"},
     )
+    if not changes:
+      return locked_user
+
+    resulting_role = changes.get("role", locked_user.role)
+    resulting_office_id = changes.get("office_id", locked_user.office_id)
+    await UserService._validate_assignment(
+      db,
+      role=resulting_role,
+      office_id=resulting_office_id,
+    )
+
+    now = datetime.now(timezone.utc)
+    await UserPersistence.close_current_history(
+      db,
+      locked_user.id,
+      valid_to=now,
+    )
+    for key, value in changes.items():
+      setattr(locked_user, key, value)
+
+    UserRepository.add_history(
+      db,
+      build_user_history(
+        locked_user,
+        actor_id=actor.id,
+        change_reason=update_data.change_reason,
+        valid_from=now,
+      ),
+    )
+    await db.flush()
+    return locked_user
 
   @staticmethod
   async def get_all_users(
-    db: AsyncSession, 
+    db: AsyncSession,
     current_user: User,
-    skip: int = 0, 
+    skip: int = 0,
     limit: int = 100,
     office_id: Optional[uuid.UUID] = None,
     role: Optional[Role] = None,
     status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
-    search: Optional[str] = None
+    search: Optional[str] = None,
   ):
-    """
-    Retrieves users while enforcing strict data minimization and isolation rules.
-    """
     scope = UserPolicy.resolve_read_scope(
       current_user,
       requested_office_id=office_id,
       requested_role=role,
       requested_status=status,
     )
-
     return await UserRepository.get_all(
       db,
       scope,
@@ -119,9 +235,8 @@ class UserService:
 
   @staticmethod
   async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User:
-    """Retrieves a specific user and ensures existence."""
     user = await UserRepository.get_by_id(db, user_id)
-    if not user:
+    if user is None:
       raise ResourceNotFoundException(
         "User not found",
         error_code="USER_NOT_FOUND",
@@ -129,13 +244,14 @@ class UserService:
     return user
 
   @staticmethod
-  async def deactivate_user(db: AsyncSession, user_id: uuid.UUID, actor: User):
-    """
-    Deactivates a user account and applies immediate Stage 1 anonymization 
-    to protect live data exposure.
-    """
-    user = await UserService.get_user_by_id(db, user_id)
-    
+  async def deactivate_user(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    actor: User,
+    *,
+    change_reason: str,
+  ) -> None:
+    user = await UserService._get_locked_user(db, user_id)
     UserPolicy.require_can_deactivate(actor, user)
 
     if not user.is_active:
@@ -143,63 +259,69 @@ class UserService:
         "User is already deactivated",
         error_code="USER_ALREADY_DEACTIVATED",
       )
-      
+
+    # Close the still-identifiable version before anonymizing the live row.
+    # This preserves the exact pre-deactivation state in the audit timeline.
+    now = datetime.now(timezone.utc)
+    await UserPersistence.close_current_history(db, user.id, valid_to=now)
+
     user.is_active = False
-    user.deactivated_at = datetime.now(timezone.utc)
-    user.email = f"deleted+{user.id}@users.invalid"
+    user.deactivated_at = now
+    user.email = f"deleted+{user.id}@users.example.com"
     user.first_name = "gelöschter"
     user.last_name = "Nutzer"
     user.hashed_password = create_unusable_password_hash()
     user.auth_version += 1
-    
-    history_entry = UserHistory(
-      user_id=user.id,
-      email=user.email,
-      first_name=user.first_name,
-      last_name=user.last_name,
-      role=user.role,
-      changed_by_user_id=actor.id,
-      change_reason="User deactivated by Administrator"
+
+    UserRepository.add_history(
+      db,
+      build_user_history(
+        user,
+        actor_id=actor.id,
+        change_reason=change_reason,
+        valid_from=now,
+      ),
     )
-    
-    UserRepository.add(db, user)
-    UserRepository.add_history(db, history_entry)
     await AuthRepository.revoke_all_refresh_sessions_for_user(
       db,
       user.id,
       RefreshSessionRevokeReason.ACCOUNT_DEACTIVATED,
+      revoked_at=now,
     )
+    await db.flush()
 
   @staticmethod
-  async def run_deep_anonymization(db: AsyncSession):
-    """
-    Cron job logic for Stage 2 anonymization. 
-    Irreversibly scrubs PII from historical audit tables based on role retention policies.
-    """
+  async def run_deep_anonymization(db: AsyncSession) -> None:
     now = datetime.now(timezone.utc)
     cutoff_citizen = now - timedelta(days=180)
     cutoff_officer = now - timedelta(days=3650)
-    
-    await UserRepository.bulk_anonymize_history(db, [Role.CITIZEN], cutoff_citizen)
+
+    await UserRepository.bulk_anonymize_history(
+      db,
+      [Role.CITIZEN],
+      cutoff_citizen,
+    )
     await UserRepository.bulk_anonymize_history(
       db,
       [Role.DISPATCHER, Role.OFFICER, Role.MANAGER, Role.ADMIN],
       cutoff_officer,
     )
-    
-    logger.info("Deep anonymization completed", extra={"completed_at": now.isoformat()})
-
+    logger.info(
+      "Deep anonymization completed",
+      extra={"completed_at": now.isoformat()},
+    )
 
   @staticmethod
   async def get_user_history(
-    db: AsyncSession, 
+    db: AsyncSession,
     user_id: uuid.UUID,
     start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None,
   ) -> list[UserHistory]:
-    """
-    Retrieves the audit trail of a user profile.
-    Ensures the user actually exists before returning history.
-    """
     await UserService.get_user_by_id(db, user_id)
-    return await UserRepository.get_history_by_user_id(db, user_id, start_date, end_date)
+    return await UserPersistence.get_history_by_user_id(
+      db,
+      user_id,
+      start_date,
+      end_date,
+    )

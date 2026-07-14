@@ -20,6 +20,7 @@ from src.core.exceptions import (
   BadRequestException,
   ConflictException,
 )
+from src.core.normalization import normalize_email
 from src.core.security import (
   TokenType,
   TokenValidationError,
@@ -33,7 +34,8 @@ from src.core.security import (
   verify_password,
 )
 from src.core.validation import has_valid_password_length
-from src.user.models import User, UserHistory
+from src.user.audit import build_user_history
+from src.user.models import User
 from src.user.repository import UserRepository
 from src.user.schemas import UserCreate
 
@@ -51,34 +53,35 @@ class AuthService:
 
   @staticmethod
   async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
-    """Validate input, create a user, and append the initial audit entry."""
-    existing_user = await UserRepository.get_by_email(db, user_data.email)
+    """Validate input, create a citizen, and append the initial version."""
+    email = normalize_email(user_data.email)
+    existing_user = await UserRepository.get_by_email(db, email)
     if existing_user:
       raise ConflictException(
         "Email already registered",
         error_code="EMAIL_ALREADY_REGISTERED",
       )
 
+    now = datetime.now(timezone.utc)
     new_user = User(
-      email=user_data.email,
+      email=email,
       hashed_password=get_password_hash(user_data.password),
       first_name=user_data.first_name,
       last_name=user_data.last_name,
+      created_at=now,
     )
 
     UserRepository.add(db, new_user)
     await db.flush()
-
-    history_entry = UserHistory(
-      user_id=new_user.id,
-      email=new_user.email,
-      first_name=new_user.first_name,
-      last_name=new_user.last_name,
-      role=new_user.role,
-      changed_by_user_id=new_user.id,
-      change_reason="Initial Registration",
+    UserRepository.add_history(
+      db,
+      build_user_history(
+        new_user,
+        actor_id=new_user.id,
+        change_reason="Initial registration",
+        valid_from=now,
+      ),
     )
-    UserRepository.add_history(db, history_entry)
 
     await db.flush()
     return new_user
@@ -96,7 +99,7 @@ class AuthService:
     if not has_valid_password_length(password):
       raise AuthenticationException("Incorrect email or password")
 
-    user = await UserRepository.get_by_email(db, email=email)
+    user = await UserRepository.get_by_email(db, email=normalize_email(email))
     if user is None:
       raise AuthenticationException("Incorrect email or password")
 
@@ -252,7 +255,7 @@ class AuthService:
     The database upsert enforces one challenge per user and a per-account
     cooldown even when multiple requests arrive concurrently.
     """
-    user = await UserRepository.get_by_email(db, email)
+    user = await UserRepository.get_by_email(db, normalize_email(email))
     if user is None or not user.is_active:
       return
 
@@ -303,7 +306,10 @@ class AuthService:
     All failure modes intentionally use the same public error response to avoid
     disclosing whether an account or a usable reset challenge exists.
     """
-    user = await UserRepository.get_by_email_for_update(db, data.email)
+    user = await UserRepository.get_by_email_for_update(
+      db,
+      normalize_email(data.email),
+    )
     if user is None or not user.is_active:
       raise AuthService._invalid_password_reset()
 

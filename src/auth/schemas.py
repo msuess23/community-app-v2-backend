@@ -1,6 +1,7 @@
-from pydantic import BaseModel, EmailStr, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr
 
 from src.core.validation import MAX_REFRESH_TOKEN_LENGTH, PasswordValue
+from src.user.schemas import NormalizedEmail
 
 
 class TokenResponse(BaseModel):
@@ -17,10 +18,10 @@ class RefreshTokenRequest(BaseModel):
 
 
 class ForgotPasswordRequest(BaseModel):
-  email: EmailStr
+  email: NormalizedEmail
 
 
 class ResetPasswordRequest(BaseModel):
-  email: EmailStr
+  email: NormalizedEmail
   otp: str = Field(pattern=r"^[0-9]{6}$")
   new_password: PasswordValue

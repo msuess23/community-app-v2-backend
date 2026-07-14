@@ -1,26 +1,33 @@
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
 import uuid
 from datetime import datetime
+from typing import List, Optional
 
-from src.core.database import get_db
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.auth.dependencies import get_current_user, role_required
-from src.user.dependencies import get_target_user_if_allowed
-from src.user.models import User, Role
-from src.user.schemas import UserResponse, UserUpdate, AdminUserUpdate, UserHistoryResponse
-from src.user.service import UserService
+from src.core.database import get_db
 from src.core.filters import LifecycleStatusFilter
+from src.user.dependencies import get_target_user_if_allowed
+from src.user.models import Role, User
+from src.user.schemas import (
+  AdminUserCreate,
+  AdminUserUpdate,
+  UserDeactivate,
+  UserHistoryResponse,
+  UserResponse,
+  UserUpdate,
+)
+from src.user.service import UserService
+
 
 router = APIRouter()
 
-# --- Private Endpoints (current user) ---
 
 @router.get("/me", response_model=UserResponse)
 async def get_my_profile(
-  current_user: User = Depends(get_current_user)
+  current_user: User = Depends(get_current_user),
 ):
-  """Returns the profile of the currently authenticated user."""
   return current_user
 
 
@@ -28,53 +35,71 @@ async def get_my_profile(
 async def update_my_profile(
   update_data: UserUpdate,
   current_user: User = Depends(get_current_user),
-  db: AsyncSession = Depends(get_db)
+  db: AsyncSession = Depends(get_db),
 ):
-  """Updates the profile of the current user."""
-  return await UserService.update_user_profile(db, current_user, update_data, current_user.id)
+  return await UserService.update_user_profile(
+    db,
+    current_user,
+    update_data,
+    current_user.id,
+  )
 
 
 @router.get("", response_model=List[UserResponse])
 async def get_all_users(
-  q: Optional[str] = Query(None, description="Search term for email, first name or last name"),
+  q: Optional[str] = Query(None),
   office_id: Optional[uuid.UUID] = None,
   role: Optional[Role] = None,
-  status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
-  skip: int = 0, 
+  status_filter: LifecycleStatusFilter = Query(
+    LifecycleStatusFilter.ACTIVE,
+    alias="status",
+  ),
+  skip: int = 0,
   limit: int = 100,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN", "MANAGER", "DISPATCHER", "OFFICER"]))
+  current_user: User = Depends(
+    role_required(["ADMIN", "MANAGER", "DISPATCHER", "OFFICER"])
+  ),
 ):
-  """
-  Returns a list of users.
-  Enforces role-based isolation and data minimization under the hood.
-  """
-  return await UserService.get_all_users(db, current_user, skip, limit, office_id, role, status, q)
+  return await UserService.get_all_users(
+    db,
+    current_user,
+    skip,
+    limit,
+    office_id,
+    role,
+    status_filter,
+    q,
+  )
+
+
+@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user_by_admin(
+  user_data: AdminUserCreate,
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(role_required(["ADMIN"])),
+):
+  return await UserService.create_user_by_admin(
+    db,
+    actor=current_user,
+    user_data=user_data,
+  )
 
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
-  target_user: User = Depends(get_target_user_if_allowed)
+  target_user: User = Depends(get_target_user_if_allowed),
 ):
-  """
-  Returns a specific user by ID.
-  """
   return target_user
 
-
-# --- Admin Endpoints ---
 
 @router.patch("/{user_id}", response_model=UserResponse)
 async def update_user_by_admin(
   user_id: uuid.UUID,
   update_data: AdminUserUpdate,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"]))
+  current_user: User = Depends(role_required(["ADMIN"])),
 ):
-  """
-  Updates a specific user's profile, including administrative fields like role and office_id.
-  Strictly restricted to administrators.
-  """
   target_user = await UserService.get_user_by_id(db, user_id)
   return await UserService.update_user_by_admin(
     db,
@@ -84,28 +109,32 @@ async def update_user_by_admin(
   )
 
 
-@router.delete("/{user_id}", status_code=204)
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_user(
   user_id: uuid.UUID,
+  command: UserDeactivate,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"]))
+  current_user: User = Depends(role_required(["ADMIN"])),
 ):
-  """
-  Soft-deletes (deactivates) a user and scrubs their live data.
-  """
-  await UserService.deactivate_user(db, user_id, current_user)
+  await UserService.deactivate_user(
+    db,
+    user_id,
+    current_user,
+    change_reason=command.change_reason,
+  )
 
 
 @router.get("/{user_id}/history", response_model=List[UserHistoryResponse])
 async def get_user_history(
   user_id: uuid.UUID,
-  start_date: Optional[datetime] = Query(None, description="Start of the validity period"),
-  end_date: Optional[datetime] = Query(None, description="End of the validity period"),
+  start_date: Optional[datetime] = Query(None),
+  end_date: Optional[datetime] = Query(None),
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"]))
+  current_user: User = Depends(role_required(["ADMIN"])),
 ):
-  """
-  Retrieves the audit trail/history for a specific user profile.
-  Strictly restricted to administrators.
-  """
-  return await UserService.get_user_history(db, user_id, start_date, end_date)
+  return await UserService.get_user_history(
+    db,
+    user_id,
+    start_date,
+    end_date,
+  )
