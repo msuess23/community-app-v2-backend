@@ -9,7 +9,7 @@ from src.core.security import get_password_hash, verify_password
 from src.core.email import send_otp_email
 from src.core.exceptions import DomainException
 from src.user.models import User, UserHistory
-from src.auth.models import PasswordReset
+from src.auth.models import PasswordReset, BlacklistedToken
 from src.user.schemas import UserCreate
 from src.auth.schemas import ResetPasswordRequest
 from src.user.repository import UserRepository
