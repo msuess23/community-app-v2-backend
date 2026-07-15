@@ -129,7 +129,7 @@ class UserService:
     cutoff_officer = now - timedelta(days=3650)
     
     await UserRepository.bulk_anonymize_history(db, [Role.CITIZEN], cutoff_citizen)
-    await UserRepository.bulk_anonymize_history(db, [Role.OFFICER, Role.MANAGER, Role.ADMIN], cutoff_officer)
+    await UserRepository.bulk_anonymize_history(db, [Role.OFFICER, Role.MANAGER, Role.DISPATCHER, Role.ADMIN], cutoff_officer)
     
     await db.commit()
     print(f"[{now.isoformat()}] Cron task: Deep anonymization completed successfully.")
