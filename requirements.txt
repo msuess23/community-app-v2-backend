@@ -15,10 +15,7 @@ pydantic-settings>=2.1.0    # Env Variables
 
 # --- Security & Authentication ---
 pwdlib[argon2]>=0.3.0       # Password hashing (new Argon2 hashes)
-bcrypt>=4.1.2               # Temporary: verify and migrate existing bcrypt hashes
 PyJWT>=2.8.0                # Tokens
 
 # --- Support ---
 python-dotenv>=1.0.1        # Env Variables
-apscheduler>=3.10.4         # Cron jobs
-slowapi>=0.1.10             # Rate limiting

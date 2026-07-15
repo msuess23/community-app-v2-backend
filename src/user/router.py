@@ -81,11 +81,10 @@ async def get_all_users(
 async def create_user_by_admin(
   user_data: AdminUserCreate,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"])),
+  _current_user: User = Depends(role_required(["ADMIN"])),
 ):
   return await UserService.create_user_by_admin(
     db,
-    actor=current_user,
     user_data=user_data,
   )
 

@@ -26,9 +26,10 @@ def build_office_history(
   *,
   actor_id: uuid.UUID,
   change_reason: str,
-  valid_from: datetime,
+  valid_to: datetime,
 ) -> OfficeHistory:
-  """Create an immutable snapshot of the office's current domain state."""
+  """Archive the office state that was valid immediately before a change."""
+  valid_from = office.updated_at or office.created_at or valid_to
   return OfficeHistory(
     office_id=office.id,
     name=office.name,
@@ -41,6 +42,7 @@ def build_office_history(
     is_active=office.is_active,
     deactivated_at=office.deactivated_at,
     valid_from=valid_from,
+    valid_to=valid_to,
     changed_by_user_id=actor_id,
     change_reason=change_reason,
   )

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +30,7 @@ async def login(
   form_data: OAuth2PasswordRequestForm = Depends(),
   db: AsyncSession = Depends(get_db),
 ):
-  """Authenticates a user and opens a new refresh-session family."""
+  """Authenticates a user and creates a refresh session."""
   return await AuthService.login(
     db,
     email=form_data.username,
@@ -43,7 +43,7 @@ async def refresh_tokens(
   request: RefreshTokenRequest,
   db: AsyncSession = Depends(get_db),
 ):
-  """Rotates a refresh token and returns a fresh access/refresh pair."""
+  """Rotates a refresh token and returns a fresh token pair."""
   return await AuthService.refresh_tokens(
     db,
     request.refresh_token.get_secret_value(),
@@ -53,26 +53,20 @@ async def refresh_tokens(
 @router.post("/forgot-password-request")
 async def forgot_password_request(
   request: ForgotPasswordRequest,
-  background_tasks: BackgroundTasks,
   db: AsyncSession = Depends(get_db),
 ):
-  """Triggers an OTP email if an active user exists."""
-  await AuthService.request_password_reset(
-    db,
-    request.email,
-    background_tasks,
-  )
-  return {"message": "If this email exists, an OTP has been sent."}
+  """Creates an OTP that is printed to the backend console for demo use."""
+  await AuthService.request_password_reset(db, request.email)
+  return {"message": "If this email exists, an OTP has been created."}
 
 
 @router.post("/reset-password")
 async def reset_password(
   request: ResetPasswordRequest,
-  background_tasks: BackgroundTasks,
   db: AsyncSession = Depends(get_db),
 ):
-  """Resets the password using a valid, single-use OTP."""
-  await AuthService.reset_password(db, request, background_tasks)
+  """Resets the password using the latest valid OTP."""
+  await AuthService.reset_password(db, request)
   return {"message": "Password updated successfully."}
 
 
@@ -81,12 +75,7 @@ async def logout(
   request: RefreshTokenRequest,
   db: AsyncSession = Depends(get_db),
 ):
-  """
-  Revokes the complete refresh-token family for the current client session.
-
-  The endpoint is intentionally idempotent and does not reveal whether the
-  submitted token existed. The client must also discard its access token.
-  """
+  """Invalidates the submitted refresh token."""
   await AuthService.logout(
     db,
     request.refresh_token.get_secret_value(),

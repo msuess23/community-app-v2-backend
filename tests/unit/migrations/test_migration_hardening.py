@@ -13,42 +13,44 @@ from src.core.database import Base, NAMING_CONVENTION
 VERSIONS_DIR = Path("alembic/versions")
 
 
-def _function_has_effect(function: ast.FunctionDef) -> bool:
-  meaningful = [
-    node
-    for node in function.body
-    if not (
-      isinstance(node, ast.Expr)
-      and isinstance(node.value, ast.Constant)
-      and isinstance(node.value.value, str)
-    )
+def test_migrations_are_squashed_to_one_baseline() -> None:
+  migrations = sorted(VERSIONS_DIR.glob("*.py"))
+  assert [path.name for path in migrations] == [
+    "c3e5f7a9b1d4_initial_schema.py"
   ]
-  return not (len(meaningful) == 1 and isinstance(meaningful[0], ast.Pass))
+
+  tree = ast.parse(migrations[0].read_text(encoding="utf-8"))
+  assignments = {
+    node.target.id: node.value
+    for node in tree.body
+    if isinstance(node, ast.AnnAssign)
+    and isinstance(node.target, ast.Name)
+  }
+  down_revision = assignments["down_revision"]
+  assert isinstance(down_revision, ast.Constant)
+  assert down_revision.value is None
 
 
-def test_migration_chain_contains_no_noop_revisions() -> None:
-  noops: list[str] = []
-  for path in VERSIONS_DIR.glob("*.py"):
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    functions = {
-      node.name: node
-      for node in tree.body
-      if isinstance(node, ast.FunctionDef) and node.name in {"upgrade", "downgrade"}
-    }
-    if functions and not any(_function_has_effect(fn) for fn in functions.values()):
-      noops.append(path.name)
+def test_baseline_contains_no_production_history_mechanisms() -> None:
+  source = (VERSIONS_DIR / "c3e5f7a9b1d4_initial_schema.py").read_text(
+    encoding="utf-8"
+  )
 
-  assert noops == []
+  assert "CREATE TRIGGER" not in source
+  assert "SYSTEM_USER" not in source
+  assert "anonymized_at" not in source
+  assert "anonymization_reason" not in source
+  assert "uq_user_history_current_version" not in source
+  assert "uq_office_history_current_version" not in source
+  assert 'sa.Column("valid_to", sa.DateTime(timezone=True), nullable=False)' in source
 
 
 def test_historical_migrations_do_not_use_unnamed_foreign_keys() -> None:
-  violations: list[str] = []
-  for path in VERSIONS_DIR.glob("*.py"):
-    source = path.read_text(encoding="utf-8")
-    if "create_foreign_key(None" in source or "drop_constraint(None" in source:
-      violations.append(path.name)
-
-  assert violations == []
+  source = (VERSIONS_DIR / "c3e5f7a9b1d4_initial_schema.py").read_text(
+    encoding="utf-8"
+  )
+  assert "create_foreign_key(None" not in source
+  assert "drop_constraint(None" not in source
 
 
 def test_metadata_has_deterministic_naming_convention() -> None:
@@ -67,25 +69,3 @@ def test_metadata_has_deterministic_naming_convention() -> None:
         unnamed.append(f"{table.name}:{type(constraint).__name__}")
 
   assert unnamed == []
-
-
-def test_broken_office_index_downgrade_was_repaired() -> None:
-  source = (
-    VERSIONS_DIR / "65ec6cbfc19c_remove_partial_index_for_office_name.py"
-  ).read_text(encoding="utf-8")
-  downgrade_source = source.split("def downgrade", maxsplit=1)[1]
-
-  assert "idx_unique_active_office_name" in downgrade_source
-  assert "create_unique_constraint" not in downgrade_source
-
-
-def test_history_guard_migration_protects_update_delete_and_truncate() -> None:
-  source = (
-    VERSIONS_DIR / "a1c3e5f7b9d2_database_history_hardening.py"
-  ).read_text(encoding="utf-8")
-
-  assert "BEFORE UPDATE OR DELETE ON user_history" in source
-  assert "BEFORE UPDATE OR DELETE ON office_history" in source
-  assert "BEFORE TRUNCATE ON user_history" in source
-  assert "BEFORE TRUNCATE ON office_history" in source
-  assert "retention period has not expired" in source

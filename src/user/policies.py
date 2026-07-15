@@ -7,50 +7,34 @@ from src.user.models import Role, User
 
 
 @dataclass(frozen=True, slots=True)
-class UserReadScope:
-  """Effective database scope for a user-list request."""
+class UserListScope:
+  """Effective filters for an authorized user-list request."""
 
   office_id: uuid.UUID | None
   role: Role | None
   status: LifecycleStatusFilter
-  exclude_citizens: bool
-
-  def contains(self, target: User) -> bool:
-    """Return whether a concrete user belongs to this read scope."""
-    if self.status == LifecycleStatusFilter.ACTIVE and not target.is_active:
-      return False
-    if self.status == LifecycleStatusFilter.INACTIVE and target.is_active:
-      return False
-    if self.exclude_citizens and target.role == Role.CITIZEN:
-      return False
-    if self.office_id is not None and target.office_id != self.office_id:
-      return False
-    if self.role is not None and target.role != self.role:
-      return False
-    return True
+  exclude_citizens: bool = False
 
 
-class UserAssignmentPolicy:
-  """Pure role/office invariants shared by services and unit tests."""
+class UserPolicy:
+  """Small collection of user assignment and authorization rules."""
 
-  _OFFICE_ROLES = frozenset({Role.DISPATCHER, Role.OFFICER, Role.MANAGER})
-  _OFFICELESS_ROLES = frozenset({Role.CITIZEN, Role.ADMIN})
+  OFFICE_ROLES = frozenset({Role.DISPATCHER, Role.OFFICER, Role.MANAGER})
 
   @classmethod
-  def validate_shape(
+  def validate_assignment(
     cls,
     *,
     role: Role,
     office_id: uuid.UUID | None,
   ) -> None:
-    if role in cls._OFFICE_ROLES and office_id is None:
+    if role in cls.OFFICE_ROLES and office_id is None:
       raise DomainValidationException(
         "Staff accounts must be assigned to an office.",
         error_code="USER_OFFICE_REQUIRED",
         details={"field": "office_id", "role": role.value},
       )
-
-    if role in cls._OFFICELESS_ROLES and office_id is not None:
+    if role not in cls.OFFICE_ROLES and office_id is not None:
       raise DomainValidationException(
         "Citizen and administrator accounts cannot be assigned to an office.",
         error_code="USER_OFFICE_NOT_ALLOWED",
@@ -59,82 +43,56 @@ class UserAssignmentPolicy:
 
   @classmethod
   def requires_office(cls, role: Role) -> bool:
-    return role in cls._OFFICE_ROLES
-
-
-class UserPolicy:
-  """Central object- and collection-level authorization for user resources."""
-
-  _OFFICE_SCOPED_ROLES = frozenset({Role.OFFICER, Role.MANAGER})
+    return role in cls.OFFICE_ROLES
 
   @classmethod
-  def resolve_read_scope(
+  def list_scope(
     cls,
     actor: User,
     *,
-    requested_office_id: uuid.UUID | None,
-    requested_role: Role | None,
-    requested_status: LifecycleStatusFilter,
-  ) -> UserReadScope:
-    """
-    Resolve client filters into the maximum scope the actor may access.
-
-    Rejecting forbidden filters explicitly prevents callers from probing a
-    broader namespace and keeps list and detail authorization equivalent.
-    """
+    office_id: uuid.UUID | None,
+    role: Role | None,
+    status: LifecycleStatusFilter,
+  ) -> UserListScope:
     if actor.role == Role.ADMIN:
-      return UserReadScope(
-        office_id=requested_office_id,
-        role=requested_role,
-        status=requested_status,
-        exclude_citizens=False,
-      )
+      return UserListScope(office_id, role, status)
 
     if actor.role == Role.CITIZEN:
       raise ForbiddenException("Citizens cannot list user accounts.")
-
-    if requested_status != LifecycleStatusFilter.ACTIVE:
+    if status != LifecycleStatusFilter.ACTIVE:
       raise ForbiddenException("Only administrators may access inactive users.")
-
-    if requested_role == Role.CITIZEN:
+    if role == Role.CITIZEN:
       raise ForbiddenException("Only administrators may access citizen accounts.")
 
-    effective_office_id = requested_office_id
-    if actor.role in cls._OFFICE_SCOPED_ROLES:
+    if actor.role in {Role.OFFICER, Role.MANAGER}:
       if actor.office_id is None:
-        raise ForbiddenException(
-          "Your account is not assigned to an office and cannot access staff accounts."
-        )
-      if requested_office_id is not None and requested_office_id != actor.office_id:
+        raise ForbiddenException("Your account is not assigned to an office.")
+      if office_id is not None and office_id != actor.office_id:
         raise ForbiddenException("You may only access users from your own office.")
-      effective_office_id = actor.office_id
+      office_id = actor.office_id
     elif actor.role != Role.DISPATCHER:
-      raise ForbiddenException("You do not have permission to access user accounts.")
+      raise ForbiddenException()
 
-    return UserReadScope(
-      office_id=effective_office_id,
-      role=requested_role,
+    return UserListScope(
+      office_id=office_id,
+      role=role,
       status=LifecycleStatusFilter.ACTIVE,
       exclude_citizens=True,
     )
 
-  @classmethod
-  def can_read(cls, actor: User, target: User) -> bool:
-    """Apply the same scope rules used by the collection endpoint."""
+  @staticmethod
+  def can_read(actor: User, target: User) -> bool:
     if actor.id == target.id or actor.role == Role.ADMIN:
       return True
-
-    try:
-      scope = cls.resolve_read_scope(
-        actor,
-        requested_office_id=None,
-        requested_role=None,
-        requested_status=LifecycleStatusFilter.ACTIVE,
-      )
-    except ForbiddenException:
+    if not target.is_active or target.role == Role.CITIZEN:
       return False
-
-    return scope.contains(target)
+    if actor.role == Role.DISPATCHER:
+      return True
+    return (
+      actor.role in {Role.OFFICER, Role.MANAGER}
+      and actor.office_id is not None
+      and actor.office_id == target.office_id
+    )
 
   @classmethod
   def require_can_read(cls, actor: User, target: User) -> None:
@@ -142,22 +100,19 @@ class UserPolicy:
       raise ForbiddenException("You do not have permission to access this user.")
 
   @staticmethod
-  def require_can_admin_update(
+  def require_admin_update(
     actor: User,
     target: User,
     *,
     new_role: Role | None,
   ) -> None:
-    """Protect administrative updates, including self-lockout scenarios."""
     if actor.role != Role.ADMIN:
       raise ForbiddenException("Only administrators may update other users.")
-
-    if actor.id == target.id and new_role is not None and new_role != Role.ADMIN:
+    if actor.id == target.id and new_role not in {None, Role.ADMIN}:
       raise ForbiddenException("Administrators cannot remove their own administrator role.")
 
   @staticmethod
-  def require_can_deactivate(actor: User, target: User) -> None:
-    """Prevent accidental loss of the currently authenticated admin account."""
+  def require_deactivation(actor: User, target: User) -> None:
     if actor.role != Role.ADMIN:
       raise ForbiddenException("Only administrators may deactivate users.")
     if actor.id == target.id:

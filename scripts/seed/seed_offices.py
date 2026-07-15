@@ -1,11 +1,9 @@
 import logging
-import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.address.service import AddressService
-from src.office.audit import build_office_history
 from src.office.models import Office
 from src.office.repository import OfficeRepository
 from src.office.schemas import OfficeCreate
@@ -14,11 +12,11 @@ from src.office.schemas import OfficeCreate
 logger = logging.getLogger(__name__)
 
 
-def _open(start: str, end: str) -> dict:
-  return {"closed": False, "intervals": [{"start": start, "end": end}]}
+def _open(start: str, end: str) -> list[dict[str, str]]:
+  return [{"start": start, "end": end}]
 
 
-async def run_office_seeder(db: AsyncSession, system_user_id: uuid.UUID) -> None:
+async def run_office_seeder(db: AsyncSession) -> None:
   """Seed default offices using validated domain payloads."""
   default_offices = [
     {
@@ -98,16 +96,8 @@ async def run_office_seeder(db: AsyncSession, system_user_id: uuid.UUID) -> None
       opening_hours=office_data.opening_hours.model_dump(mode="json"),
       address=address_entity,
       created_at=now,
+      updated_at=now,
     )
     OfficeRepository.add(db, new_office)
     await db.flush()
-    OfficeRepository.add_history(
-      db,
-      build_office_history(
-        new_office,
-        actor_id=system_user_id,
-        change_reason="System seed: default office",
-        valid_from=now,
-      ),
-    )
     logger.info("Created seed office", extra={"office": new_office.name})

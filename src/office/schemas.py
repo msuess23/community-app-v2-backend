@@ -9,6 +9,7 @@ from pydantic import (
   ConfigDict,
   EmailStr,
   Field,
+  field_validator,
   model_validator,
 )
 
@@ -61,41 +62,38 @@ class OpeningInterval(BaseModel):
     return self
 
 
-class DaySchedule(BaseModel):
-  closed: bool = True
-  intervals: list[OpeningInterval] = Field(default_factory=list, max_length=8)
+class OpeningHours(BaseModel):
+  """Opening intervals per weekday; an empty list means closed."""
+
+  monday: list[OpeningInterval] = Field(default_factory=list, max_length=8)
+  tuesday: list[OpeningInterval] = Field(default_factory=list, max_length=8)
+  wednesday: list[OpeningInterval] = Field(default_factory=list, max_length=8)
+  thursday: list[OpeningInterval] = Field(default_factory=list, max_length=8)
+  friday: list[OpeningInterval] = Field(default_factory=list, max_length=8)
+  saturday: list[OpeningInterval] = Field(default_factory=list, max_length=8)
+  sunday: list[OpeningInterval] = Field(default_factory=list, max_length=8)
 
   @model_validator(mode="before")
   @classmethod
-  def infer_closed(cls, data):
-    if isinstance(data, dict) and "closed" not in data:
-      data = dict(data)
-      data["closed"] = not bool(data.get("intervals"))
-    return data
+  def accept_legacy_day_objects(cls, data):
+    """Accept data stored before Patch 11 without preserving its redundant flag."""
+    if not isinstance(data, dict):
+      return data
 
-  @model_validator(mode="after")
-  def validate_schedule(self) -> "DaySchedule":
-    if self.closed and self.intervals:
-      raise ValueError("a closed day cannot contain opening intervals")
-    if not self.closed and not self.intervals:
-      raise ValueError("an open day requires at least one opening interval")
+    converted = dict(data)
+    for day, value in converted.items():
+      if isinstance(value, dict) and "intervals" in value:
+        converted[day] = [] if value.get("closed") else value.get("intervals", [])
+    return converted
 
-    ordered = sorted(self.intervals, key=lambda interval: interval.start)
+  @field_validator("*")
+  @classmethod
+  def validate_day(cls, intervals: list[OpeningInterval]) -> list[OpeningInterval]:
+    ordered = sorted(intervals, key=lambda interval: interval.start)
     for previous, current in zip(ordered, ordered[1:]):
       if previous.end > current.start:
         raise ValueError("opening intervals must not overlap")
-    self.intervals = ordered
-    return self
-
-
-class OpeningHours(BaseModel):
-  monday: DaySchedule = Field(default_factory=DaySchedule)
-  tuesday: DaySchedule = Field(default_factory=DaySchedule)
-  wednesday: DaySchedule = Field(default_factory=DaySchedule)
-  thursday: DaySchedule = Field(default_factory=DaySchedule)
-  friday: DaySchedule = Field(default_factory=DaySchedule)
-  saturday: DaySchedule = Field(default_factory=DaySchedule)
-  sunday: DaySchedule = Field(default_factory=DaySchedule)
+    return ordered
 
 
 class OfficeSortField(str, Enum):
@@ -171,6 +169,6 @@ class OfficeHistoryResponse(BaseModel):
   changed_by_user_id: UUID
   change_reason: str
   valid_from: datetime
-  valid_to: Optional[datetime] = None
+  valid_to: datetime
 
   model_config = ConfigDict(from_attributes=True)

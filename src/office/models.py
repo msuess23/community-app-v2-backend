@@ -12,7 +12,6 @@ from sqlalchemy import (
   String,
   UniqueConstraint,
   func,
-  text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -35,6 +34,12 @@ class Office(Base):
   opening_hours = Column(JSONB, nullable=False, default=dict, server_default="{}")
   is_active = Column(Boolean, nullable=False, default=True, server_default="true")
   created_at = Column(
+    DateTime(timezone=True),
+    nullable=False,
+    default=lambda: datetime.now(timezone.utc),
+    server_default=func.now(),
+  )
+  updated_at = Column(
     DateTime(timezone=True),
     nullable=False,
     default=lambda: datetime.now(timezone.utc),
@@ -71,6 +76,10 @@ class Office(Base):
       name="ck_offices_contact_email_canonical",
     ),
     CheckConstraint(
+      "updated_at >= created_at",
+      name="ck_offices_updated_after_creation",
+    ),
+    CheckConstraint(
       "(is_active IS TRUE AND deactivated_at IS NULL) OR "
       "(is_active IS FALSE AND deactivated_at IS NOT NULL)",
       name="ck_offices_deactivation_state",
@@ -94,7 +103,7 @@ class Office(Base):
 
 
 class OfficeHistory(Base):
-  """Temporal snapshot of an office version, valid on [valid_from, valid_to)."""
+  """Immutable snapshot of an office state immediately before a change."""
 
   __tablename__ = "office_history"
 
@@ -116,13 +125,8 @@ class OfficeHistory(Base):
   is_active = Column(Boolean, nullable=False)
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
 
-  valid_from = Column(
-    DateTime(timezone=True),
-    nullable=False,
-    default=lambda: datetime.now(timezone.utc),
-    server_default=func.now(),
-  )
-  valid_to = Column(DateTime(timezone=True), nullable=True)
+  valid_from = Column(DateTime(timezone=True), nullable=False)
+  valid_to = Column(DateTime(timezone=True), nullable=False)
   changed_by_user_id = Column(
     UUID(as_uuid=True),
     ForeignKey("users.id", ondelete="RESTRICT"),
@@ -156,13 +160,7 @@ class OfficeHistory(Base):
       name="ck_office_history_opening_hours_object",
     ),
     CheckConstraint(
-      "valid_to IS NULL OR valid_to >= valid_from",
+      "valid_to >= valid_from",
       name="ck_office_history_valid_period",
-    ),
-    Index(
-      "uq_office_history_current_version",
-      "office_id",
-      unique=True,
-      postgresql_where=text("valid_to IS NULL"),
     ),
   )

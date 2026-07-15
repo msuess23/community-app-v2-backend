@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,7 +21,7 @@ from src.office.schemas import OfficeSortField
 
 
 class OfficeRepository:
-  """Data access layer for offices and their temporal history."""
+  """Data access layer for offices and archived old-state snapshots."""
 
   @staticmethod
   async def get_by_id(db: AsyncSession, office_id: uuid.UUID) -> Optional[Office]:
@@ -128,36 +128,17 @@ class OfficeRepository:
     db.add(history_entry)
 
   @staticmethod
-  async def close_current_history(
-    db: AsyncSession,
-    office_id: uuid.UUID,
-    *,
-    valid_to: datetime,
-  ) -> None:
-    await db.execute(
-      update(OfficeHistory)
-      .where(
-        OfficeHistory.office_id == office_id,
-        OfficeHistory.valid_to.is_(None),
-      )
-      .values(valid_to=valid_to)
-    )
-
-  @staticmethod
   async def get_history_by_office_id(
     db: AsyncSession,
     office_id: uuid.UUID,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
   ) -> list[OfficeHistory]:
-    """Return versions whose validity interval overlaps the requested range."""
+    """Return archived states whose validity interval overlaps the range."""
     query = select(OfficeHistory).where(OfficeHistory.office_id == office_id)
 
     if start_date is not None:
-      query = query.where(
-        (OfficeHistory.valid_to.is_(None))
-        | (OfficeHistory.valid_to > start_date)
-      )
+      query = query.where(OfficeHistory.valid_to > start_date)
     if end_date is not None:
       query = query.where(OfficeHistory.valid_from <= end_date)
 

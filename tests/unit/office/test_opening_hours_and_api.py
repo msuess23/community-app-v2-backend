@@ -1,6 +1,3 @@
-import importlib.util
-from pathlib import Path
-
 import pytest
 from pydantic import ValidationError
 
@@ -18,12 +15,11 @@ def test_opening_hours_are_structured_and_sorted() -> None:
     }
   )
 
-  assert hours.monday.closed is False
-  assert [str(interval.start) for interval in hours.monday.intervals] == [
+  assert [str(interval.start) for interval in hours.monday] == [
     "08:00:00",
     "13:00:00",
   ]
-  assert hours.sunday.closed is True
+  assert hours.sunday == []
 
 
 def test_overlapping_opening_hours_are_rejected() -> None:
@@ -61,31 +57,6 @@ def test_public_office_routes_do_not_expose_lifecycle_filter() -> None:
   assert "status" not in public_parameters
   assert "status" in admin_parameters
   assert "/api/v1/offices/admin/{office_id}" in schema["paths"]
-
-
-def test_legacy_opening_hours_migration_parser() -> None:
-  migration_path = (
-    Path(__file__).parents[3]
-    / "alembic/versions/f8d0b3c5a7e9_office_api_and_validation_hardening.py"
-  )
-  spec = importlib.util.spec_from_file_location("step7_migration", migration_path)
-  assert spec is not None and spec.loader is not None
-  migration = importlib.util.module_from_spec(spec)
-  spec.loader.exec_module(migration)
-
-  normalized = migration._normalize_opening_hours(
-    {"monday": "08:00-12:00, 13:00-16:00", "sunday": "geschlossen"},
-    row_label="test",
-  )
-
-  assert normalized["monday"] == {
-    "closed": False,
-    "intervals": [
-      {"start": "08:00:00", "end": "12:00:00"},
-      {"start": "13:00:00", "end": "16:00:00"},
-    ],
-  }
-  assert normalized["sunday"] == {"closed": True, "intervals": []}
 
 
 def test_patch_rejects_null_for_non_nullable_office_fields() -> None:

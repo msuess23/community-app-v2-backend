@@ -13,7 +13,6 @@ from sqlalchemy import (
   Integer,
   String,
   func,
-  text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -52,6 +51,12 @@ class User(Base):
     default=lambda: datetime.now(timezone.utc),
     server_default=func.now(),
   )
+  updated_at = Column(
+    DateTime(timezone=True),
+    nullable=False,
+    default=lambda: datetime.now(timezone.utc),
+    server_default=func.now(),
+  )
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
 
   history = relationship(
@@ -79,6 +84,10 @@ class User(Base):
       name="ck_users_auth_version_nonnegative",
     ),
     CheckConstraint(
+      "updated_at >= created_at",
+      name="ck_users_updated_after_creation",
+    ),
+    CheckConstraint(
       "(is_active IS TRUE AND deactivated_at IS NULL) OR "
       "(is_active IS FALSE AND deactivated_at IS NOT NULL)",
       name="ck_users_deactivation_state",
@@ -98,7 +107,7 @@ class User(Base):
 
 
 class UserHistory(Base):
-  """Temporal snapshot of a user version, valid on [valid_from, valid_to)."""
+  """Immutable snapshot of a user state immediately before a change."""
 
   __tablename__ = "user_history"
 
@@ -122,26 +131,14 @@ class UserHistory(Base):
   is_active = Column(Boolean, nullable=False)
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
 
-  valid_from = Column(
-    DateTime(timezone=True),
-    nullable=False,
-    default=lambda: datetime.now(timezone.utc),
-    server_default=func.now(),
-  )
-  valid_to = Column(DateTime(timezone=True), nullable=True)
+  valid_from = Column(DateTime(timezone=True), nullable=False)
+  valid_to = Column(DateTime(timezone=True), nullable=False)
   changed_by_user_id = Column(
     UUID(as_uuid=True),
     ForeignKey("users.id", ondelete="RESTRICT"),
     nullable=False,
   )
   change_reason = Column(String(500), nullable=False)
-  anonymized_at = Column(DateTime(timezone=True), nullable=True)
-  anonymized_by_user_id = Column(
-    UUID(as_uuid=True),
-    ForeignKey("users.id", ondelete="RESTRICT"),
-    nullable=True,
-  )
-  anonymization_reason = Column(String(500), nullable=True)
 
   user = relationship(
     "User",
@@ -149,7 +146,6 @@ class UserHistory(Base):
     back_populates="history",
   )
   changed_by = relationship("User", foreign_keys=[changed_by_user_id])
-  anonymized_by = relationship("User", foreign_keys=[anonymized_by_user_id])
 
   __table_args__ = (
     CheckConstraint(
@@ -174,20 +170,7 @@ class UserHistory(Base):
       name="ck_user_history_deactivation_state",
     ),
     CheckConstraint(
-      "(anonymized_at IS NULL AND anonymized_by_user_id IS NULL "
-      "AND anonymization_reason IS NULL) OR "
-      "(anonymized_at IS NOT NULL AND anonymized_by_user_id IS NOT NULL "
-      "AND btrim(anonymization_reason) <> '')",
-      name="ck_user_history_anonymization_state",
-    ),
-    CheckConstraint(
-      "valid_to IS NULL OR valid_to >= valid_from",
+      "valid_to >= valid_from",
       name="ck_user_history_valid_period",
-    ),
-    Index(
-      "uq_user_history_current_version",
-      "user_id",
-      unique=True,
-      postgresql_where=text("valid_to IS NULL"),
     ),
   )

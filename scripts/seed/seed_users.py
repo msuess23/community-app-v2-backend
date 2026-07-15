@@ -1,13 +1,12 @@
 import logging
-import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import settings
 from src.core.normalization import normalize_email
 from src.core.security import get_password_hash
 from src.office.repository import OfficeRepository
-from src.user.audit import build_user_history
 from src.user.models import Role, User
 from src.user.repository import UserRepository
 
@@ -15,14 +14,16 @@ from src.user.repository import UserRepository
 logger = logging.getLogger(__name__)
 
 
-async def run_user_seeder(db: AsyncSession, system_user_id: uuid.UUID) -> None:
+async def run_user_seeder(db: AsyncSession) -> None:
   """Seed development users with valid role/office assignments."""
   bauamt = await OfficeRepository.get_by_name(db, "Bauamt")
   buergeramt = await OfficeRepository.get_by_name(db, "Bürgeramt")
   if bauamt is None or buergeramt is None:
     raise RuntimeError("Required seed offices are missing")
 
-  default_password = get_password_hash("password123")
+  if settings.SEED_DEFAULT_PASSWORD is None:
+    raise RuntimeError("SEED_DEFAULT_PASSWORD is required for development seeding")
+  default_password = get_password_hash(settings.SEED_DEFAULT_PASSWORD)
   default_users = [
     {
       "email": "admin@test.com",
@@ -132,16 +133,8 @@ async def run_user_seeder(db: AsyncSession, system_user_id: uuid.UUID) -> None:
       role=user_data["role"],
       office_id=user_data["office_id"],
       created_at=now,
+      updated_at=now,
     )
     UserRepository.add(db, new_user)
     await db.flush()
-    UserRepository.add_history(
-      db,
-      build_user_history(
-        new_user,
-        actor_id=system_user_id,
-        change_reason="System seed: default user",
-        valid_from=now,
-      ),
-    )
     logger.info("Created seed user", extra={"email": new_user.email})

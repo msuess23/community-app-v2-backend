@@ -89,9 +89,9 @@ async def get_public_office(
 async def create_office(
   office_data: OfficeCreate,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"])),
+  _current_user: User = Depends(role_required(["ADMIN"])),
 ):
-  return await OfficeService.create_office(db, office_data, current_user.id)
+  return await OfficeService.create_office(db, office_data)
 
 
 @router.patch("/{office_id}", response_model=OfficeResponse)

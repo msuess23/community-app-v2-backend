@@ -69,11 +69,11 @@ def test_list_scope_rejects_cross_office_filter() -> None:
   actor = make_user(Role.OFFICER, office_id=uuid.uuid4())
 
   with pytest.raises(ForbiddenException):
-    UserPolicy.resolve_read_scope(
+    UserPolicy.list_scope(
       actor,
-      requested_office_id=uuid.uuid4(),
-      requested_role=None,
-      requested_status=LifecycleStatusFilter.ACTIVE,
+      office_id=uuid.uuid4(),
+      role=None,
+      status=LifecycleStatusFilter.ACTIVE,
     )
 
 
@@ -81,19 +81,19 @@ def test_non_admin_list_scope_rejects_inactive_and_citizen_filters() -> None:
   actor = make_user(Role.DISPATCHER)
 
   with pytest.raises(ForbiddenException):
-    UserPolicy.resolve_read_scope(
+    UserPolicy.list_scope(
       actor,
-      requested_office_id=None,
-      requested_role=None,
-      requested_status=LifecycleStatusFilter.INACTIVE,
+      office_id=None,
+      role=None,
+      status=LifecycleStatusFilter.INACTIVE,
     )
 
   with pytest.raises(ForbiddenException):
-    UserPolicy.resolve_read_scope(
+    UserPolicy.list_scope(
       actor,
-      requested_office_id=None,
-      requested_role=Role.CITIZEN,
-      requested_status=LifecycleStatusFilter.ACTIVE,
+      office_id=None,
+      role=Role.CITIZEN,
+      status=LifecycleStatusFilter.ACTIVE,
     )
 
 
@@ -101,11 +101,11 @@ def test_admin_scope_preserves_requested_filters() -> None:
   office_id = uuid.uuid4()
   actor = make_user(Role.ADMIN)
 
-  scope = UserPolicy.resolve_read_scope(
+  scope = UserPolicy.list_scope(
     actor,
-    requested_office_id=office_id,
-    requested_role=Role.CITIZEN,
-    requested_status=LifecycleStatusFilter.INACTIVE,
+    office_id=office_id,
+    role=Role.CITIZEN,
+    status=LifecycleStatusFilter.INACTIVE,
   )
 
   assert scope.office_id == office_id
@@ -118,11 +118,11 @@ def test_admin_cannot_remove_own_role_or_deactivate_self() -> None:
   actor = make_user(Role.ADMIN)
 
   with pytest.raises(ForbiddenException):
-    UserPolicy.require_can_admin_update(
+    UserPolicy.require_admin_update(
       actor,
       actor,
       new_role=Role.OFFICER,
     )
 
   with pytest.raises(ForbiddenException):
-    UserPolicy.require_can_deactivate(actor, actor)
+    UserPolicy.require_deactivation(actor, actor)

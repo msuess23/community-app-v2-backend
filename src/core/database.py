@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
-from typing import NoReturn
 
 from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import (
@@ -13,7 +12,6 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import declarative_base
 
 from src.core.config import settings
-from src.core.exceptions import DomainException
 
 
 engine = create_async_engine(
@@ -43,25 +41,6 @@ NAMING_CONVENTION = {
 Base = declarative_base(metadata=MetaData(naming_convention=NAMING_CONVENTION))
 
 
-class _CommitAndRaise(Exception):
-  """Internal signal for security state that must persist before an error."""
-
-  def __init__(self, public_error: DomainException) -> None:
-    self.public_error = public_error
-    super().__init__(str(public_error))
-
-
-def commit_and_raise(error: DomainException) -> NoReturn:
-  """
-  Persist the current unit of work and then expose an expected domain error.
-
-  This is intentionally narrow. It is used for security state such as a failed
-  OTP-attempt counter or refresh-token replay revocation, where rolling back the
-  mutation would make the protection ineffective.
-  """
-  raise _CommitAndRaise(error)
-
-
 @asynccontextmanager
 async def transactional_session() -> AsyncIterator[AsyncSession]:
   """
@@ -73,13 +52,6 @@ async def transactional_session() -> AsyncIterator[AsyncSession]:
   async with AsyncSessionLocal() as session:
     try:
       yield session
-    except _CommitAndRaise as signal:
-      try:
-        await session.commit()
-      except BaseException:
-        await session.rollback()
-        raise
-      raise signal.public_error
     except BaseException:
       await session.rollback()
       raise

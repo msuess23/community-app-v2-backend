@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import secrets
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
@@ -13,19 +11,16 @@ from pydantic import BaseModel, ValidationError
 from pwdlib import PasswordHash
 from pwdlib.exceptions import UnknownHashError
 from pwdlib.hashers.argon2 import Argon2Hasher
-from pwdlib.hashers.bcrypt import BcryptHasher
 
 from src.core.config import settings
 
 
-# New hashes use Argon2. Existing bcrypt hashes remain readable and are
-# transparently upgraded after the next successful login.
-_password_hash = PasswordHash((Argon2Hasher(), BcryptHasher()))
+# The study project starts with a fresh database, so Argon2 is sufficient.
+_password_hash = PasswordHash((Argon2Hasher(),))
 
 
 class TokenType(str, Enum):
     ACCESS = "access"
-    REFRESH = "refresh"
 
 
 class TokenClaims(BaseModel):
@@ -39,36 +34,16 @@ class TokenClaims(BaseModel):
     ver: int
 
 
-@dataclass(frozen=True, slots=True)
-class IssuedToken:
-    value: str
-    jti: uuid.UUID
-    expires_at: datetime
-
-
 class TokenValidationError(Exception):
     """Raised when a JWT is invalid or has the wrong semantic type."""
 
 
-def verify_and_update_password(
-    plain_password: str,
-    hashed_password: str,
-) -> tuple[bool, str | None]:
-    """
-    Verify a password and optionally return a modernized hash.
-
-    Invalid or unknown hashes are treated as a failed login instead of causing
-    an HTTP 500 response.
-    """
-    try:
-        return _password_hash.verify_and_update(plain_password, hashed_password)
-    except (UnknownHashError, ValueError, TypeError):
-        return False, None
-
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    valid, _ = verify_and_update_password(plain_password, hashed_password)
-    return valid
+    """Treat unknown or malformed hashes as an ordinary failed login."""
+    try:
+        return _password_hash.verify(plain_password, hashed_password)
+    except (UnknownHashError, ValueError, TypeError):
+        return False
 
 
 def get_password_hash(password: str) -> str:
@@ -83,11 +58,6 @@ def create_unusable_password_hash() -> str:
 def hash_token(token: str) -> str:
     """Return a deterministic, non-reversible fingerprint for token storage."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def token_hash_matches(token: str, expected_hash: str) -> bool:
-    """Compare a presented token with its stored fingerprint in constant time."""
-    return hmac.compare_digest(hash_token(token), expected_hash)
 
 
 def _create_token(
@@ -127,47 +97,9 @@ def create_access_token(subject: str | uuid.UUID, *, auth_version: int) -> str:
     )
 
 
-def issue_refresh_token(
-    subject: str | uuid.UUID,
-    *,
-    auth_version: int,
-    token_id: uuid.UUID | None = None,
-    expires_at: datetime | None = None,
-) -> IssuedToken:
-    issued_at = datetime.now(timezone.utc)
-    effective_expires_at = expires_at or (
-        issued_at + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    )
-    jti = token_id or uuid.uuid4()
-    value = _create_token(
-        subject=subject,
-        token_type=TokenType.REFRESH,
-        auth_version=auth_version,
-        issued_at=issued_at,
-        expires_at=effective_expires_at,
-        token_id=jti,
-    )
-    return IssuedToken(
-        value=value,
-        jti=jti,
-        expires_at=effective_expires_at,
-    )
-
-
-def create_refresh_token(
-    subject: str | uuid.UUID,
-    *,
-    auth_version: int,
-    token_id: uuid.UUID | None = None,
-    expires_at: datetime | None = None,
-) -> str:
-    """Compatibility wrapper for code that only needs the encoded token."""
-    return issue_refresh_token(
-        subject,
-        auth_version=auth_version,
-        token_id=token_id,
-        expires_at=expires_at,
-    ).value
+def create_refresh_token() -> str:
+    """Create an opaque refresh token that is stored only as a SHA-256 hash."""
+    return secrets.token_urlsafe(48)
 
 
 def decode_token(token: str, *, expected_type: TokenType) -> TokenClaims:

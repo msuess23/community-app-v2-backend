@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import pytest
 
 from src.core import database
-from src.core.exceptions import ConflictException
 
 
 @dataclass
@@ -57,24 +56,6 @@ async def test_transactional_session_rolls_back_on_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_commit_and_raise_persists_security_state(monkeypatch):
-  session = FakeSession()
-  monkeypatch.setattr(database, "AsyncSessionLocal", lambda: session)
-  public_error = ConflictException(
-    "Replay detected",
-    error_code="TOKEN_REPLAY_DETECTED",
-  )
-
-  with pytest.raises(ConflictException) as raised:
-    async with database.transactional_session():
-      database.commit_and_raise(public_error)
-
-  assert raised.value is public_error
-  assert session.commits == 1
-  assert session.rollbacks == 0
-
-
-@pytest.mark.asyncio
 async def test_failed_commit_is_rolled_back(monkeypatch):
   session = FakeSession(fail_commit=True)
   monkeypatch.setattr(database, "AsyncSessionLocal", lambda: session)
@@ -111,6 +92,6 @@ def test_response_validation_failure_rolls_back_before_commit(monkeypatch):
     response = client.get("/invalid")
 
   assert response.status_code == 500
-  assert response.json()["error"]["code"] == "RESPONSE_VALIDATION_FAILED"
+  assert response.json()["error_code"] == "INTERNAL_SERVER_ERROR"
   assert session.commits == 0
   assert session.rollbacks == 1

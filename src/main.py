@@ -6,8 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.core.config import settings
 from src.core.database import engine
 from src.core.error_handlers import register_exception_handlers
-from src.core.request_id import RequestIdMiddleware
-from src.core.scheduler import setup_scheduler, shutdown_scheduler
 
 import src.auth.models
 import src.user.models
@@ -20,12 +18,10 @@ from src.office.router import router as office_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-  """Start infrastructure components and always release them on shutdown."""
-  setup_scheduler()
+  """Release database resources when the application stops."""
   try:
     yield
   finally:
-    shutdown_scheduler()
     await engine.dispose()
 
 
@@ -35,11 +31,10 @@ app = FastAPI(
   lifespan=lifespan,
 )
 
-app.add_middleware(RequestIdMiddleware)
 
 app.add_middleware(
   CORSMiddleware,
-  allow_origins=["*"],
+  allow_origins=settings.CORS_ORIGINS,
   allow_credentials=True,
   allow_methods=["*"],
   allow_headers=["*"],

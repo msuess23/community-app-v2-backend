@@ -60,7 +60,6 @@ class AdminUserCreate(BaseModel):
   last_name: PersonName
   role: Role
   office_id: Optional[UUID] = None
-  change_reason: ChangeReason
 
 
 class UserResponse(BaseMetadataResponse):
@@ -127,9 +126,6 @@ class UserHistoryResponse(BaseModel):
   changed_by_user_id: UUID
   change_reason: str
   valid_from: datetime
-  valid_to: Optional[datetime] = None
-  anonymized_at: Optional[datetime] = None
-  anonymized_by_user_id: Optional[UUID] = None
-  anonymization_reason: Optional[str] = None
+  valid_to: datetime
 
   model_config = ConfigDict(from_attributes=True)

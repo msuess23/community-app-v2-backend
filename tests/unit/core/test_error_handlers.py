@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 
 import pytest
@@ -16,19 +14,8 @@ from src.core.error_handlers import (
 from src.core.exceptions import ResourceNotFoundException
 
 
-REQUEST_ID = "a8df1b90-2c2e-42e7-b2cb-6ec4a9cbcc13"
-
-
 def make_request() -> Request:
-  return Request(
-    {
-      "type": "http",
-      "method": "GET",
-      "path": "/test",
-      "headers": [],
-      "state": {"request_id": REQUEST_ID},
-    }
-  )
+  return Request({"type": "http", "method": "GET", "path": "/test", "headers": []})
 
 
 def response_json(response) -> dict:
@@ -36,24 +23,17 @@ def response_json(response) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_domain_error_uses_uniform_envelope():
+async def test_domain_error_uses_simple_error_contract():
   response = await domain_exception_handler(
     make_request(),
-    ResourceNotFoundException(
-      "User not found",
-      error_code="USER_NOT_FOUND",
-    ),
+    ResourceNotFoundException("User not found", error_code="USER_NOT_FOUND"),
   )
 
   assert response.status_code == status.HTTP_404_NOT_FOUND
-  assert response.headers["X-Request-ID"] == REQUEST_ID
   assert response_json(response) == {
-    "error": {
-      "code": "USER_NOT_FOUND",
-      "message": "User not found",
-      "details": [],
-      "request_id": REQUEST_ID,
-    }
+    "error_code": "USER_NOT_FOUND",
+    "message": "User not found",
+    "details": [],
   }
 
 
@@ -75,8 +55,8 @@ async def test_request_validation_does_not_echo_sensitive_input():
   payload = response_json(response)
 
   assert response.status_code == 422
-  assert payload["error"]["code"] == "REQUEST_VALIDATION_FAILED"
-  assert payload["error"]["details"] == [
+  assert payload["error_code"] == "REQUEST_VALIDATION_FAILED"
+  assert payload["details"] == [
     {
       "field": "body.password",
       "message": "String should have at least 8 characters",
@@ -99,5 +79,5 @@ async def test_unique_integrity_error_is_translated_to_conflict():
   payload = response_json(response)
 
   assert response.status_code == status.HTTP_409_CONFLICT
-  assert payload["error"]["code"] == "UNIQUE_CONSTRAINT_VIOLATION"
+  assert payload["error_code"] == "UNIQUE_CONSTRAINT_VIOLATION"
   assert "INSERT INTO" not in response.body.decode("utf-8")

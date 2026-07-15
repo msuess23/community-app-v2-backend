@@ -9,9 +9,10 @@ def build_user_history(
   *,
   actor_id: uuid.UUID,
   change_reason: str,
-  valid_from: datetime,
+  valid_to: datetime,
 ) -> UserHistory:
-  """Create an immutable snapshot of the user's current domain state."""
+  """Archive the user state that was valid immediately before a change."""
+  valid_from = user.updated_at or user.created_at or valid_to
   return UserHistory(
     user_id=user.id,
     email=user.email,
@@ -22,6 +23,7 @@ def build_user_history(
     is_active=user.is_active,
     deactivated_at=user.deactivated_at,
     valid_from=valid_from,
+    valid_to=valid_to,
     changed_by_user_id=actor_id,
     change_reason=change_reason,
   )
