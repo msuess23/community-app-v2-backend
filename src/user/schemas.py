@@ -10,6 +10,8 @@ from src.user.models import Role
 
 
 class UserCreate(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
   email: EmailStr
   password: str = Field(..., min_length=8, max_length=128)
   first_name: str = Field(..., min_length=2)
@@ -45,6 +47,27 @@ class UserUpdate(BaseModel):
 class AdminUserUpdate(UserUpdate):
   role: Optional[Role] = None
   office_id: Optional[UUID] = None
+  change_reason: str = Field(..., min_length=3, max_length=500)
+
+  @field_validator("change_reason")
+  @classmethod
+  def normalize_change_reason(cls, value: str) -> str:
+    normalized = value.strip()
+    if len(normalized) < 3:
+      raise ValueError("change_reason must contain at least 3 characters")
+    return normalized
+
+
+class UserDeactivateRequest(BaseModel):
+  change_reason: str = Field(..., min_length=3, max_length=500)
+
+  @field_validator("change_reason")
+  @classmethod
+  def normalize_change_reason(cls, value: str) -> str:
+    normalized = value.strip()
+    if len(normalized) < 3:
+      raise ValueError("change_reason must contain at least 3 characters")
+    return normalized
 
 
 class UserHistoryResponse(BaseModel):
@@ -54,6 +77,9 @@ class UserHistoryResponse(BaseModel):
   first_name: str
   last_name: str
   role: Role
+  office_id: Optional[UUID] = None
+  is_active: bool
+  deactivated_at: Optional[datetime] = None
   changed_by_user_id: UUID
   change_reason: str
   changed_at: datetime

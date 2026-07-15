@@ -7,7 +7,13 @@ from datetime import datetime
 from src.core.database import get_db
 from src.auth.dependencies import get_current_user, role_required, get_target_user_if_allowed
 from src.user.models import User, Role
-from src.user.schemas import UserResponse, UserUpdate, AdminUserUpdate, UserHistoryResponse
+from src.user.schemas import (
+  AdminUserUpdate,
+  UserDeactivateRequest,
+  UserHistoryResponse,
+  UserResponse,
+  UserUpdate,
+)
 from src.user.service import UserService
 from src.core.filters import LifecycleStatusFilter
 
@@ -81,13 +87,19 @@ async def update_user_by_admin(
 @router.delete("/{user_id}", status_code=204)
 async def deactivate_user(
   user_id: uuid.UUID,
+  request: UserDeactivateRequest,
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(role_required(Role.ADMIN))
 ):
   """
   Soft-deletes (deactivates) a user and scrubs their live data.
   """
-  await UserService.deactivate_user(db, user_id, current_user.id)
+  await UserService.deactivate_user(
+    db,
+    user_id,
+    current_user.id,
+    request.change_reason,
+  )
 
 
 @router.get("/{user_id}/history", response_model=List[UserHistoryResponse])

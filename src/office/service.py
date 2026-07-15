@@ -14,6 +14,7 @@ from src.core.filters import LifecycleStatusFilter
 from src.office.models import Office, OfficeHistory
 from src.office.repository import OfficeRepository
 from src.office.schemas import OfficeCreate, OfficeUpdate
+from src.user.repository import UserRepository
 
 
 class OfficeService:
@@ -24,6 +25,26 @@ class OfficeService:
     if not address:
       return None
     return f"{address.street} {address.house_number}, {address.zip_code} {address.city}"
+
+  @staticmethod
+  def _create_history_snapshot(
+    office: Office,
+    changed_by_user_id: uuid.UUID,
+    change_reason: str,
+  ) -> OfficeHistory:
+    return OfficeHistory(
+      office_id=office.id,
+      name=office.name,
+      description=office.description,
+      contact_email=office.contact_email,
+      phone=office.phone,
+      services=list(office.services or []),
+      opening_hours=dict(office.opening_hours or {}),
+      address_snapshot=OfficeService._format_address_snapshot(office.address),
+      is_active=office.is_active,
+      changed_by_user_id=changed_by_user_id,
+      change_reason=change_reason,
+    )
 
   @staticmethod
   async def get_all_offices(
@@ -50,7 +71,7 @@ class OfficeService:
   async def create_office(
     db: AsyncSession,
     office_data: OfficeCreate,
-    admin_id: uuid.UUID,
+    _admin_id: uuid.UUID,
   ) -> Office:
     address_entity = None
     if office_data.address:
@@ -73,24 +94,6 @@ class OfficeService:
     )
     OfficeRepository.add(db, new_office)
     await db.flush()
-
-    OfficeRepository.add_history(
-      db,
-      OfficeHistory(
-        office_id=new_office.id,
-        name=new_office.name,
-        description=new_office.description,
-        contact_email=new_office.contact_email,
-        phone=new_office.phone,
-        services=new_office.services,
-        opening_hours=new_office.opening_hours,
-        address_snapshot=OfficeService._format_address_snapshot(address_entity),
-        changed_by_user_id=admin_id,
-        change_reason="Initial office creation",
-      ),
-    )
-
-    await db.flush()
     await db.refresh(new_office)
     return new_office
 
@@ -107,19 +110,34 @@ class OfficeService:
         error_code="OFFICE_INACTIVE",
       )
 
-    update_dict = update_data.model_dump(exclude_unset=True)
-    if not update_dict:
+    raw_update = update_data.model_dump(
+      exclude_unset=True,
+      exclude={"change_reason", "address"},
+    )
+    address_update = (
+      update_data.address.model_dump(exclude_unset=True)
+      if update_data.address is not None
+      else {}
+    )
+    effective_changes = {
+      key: value
+      for key, value in raw_update.items()
+      if getattr(office, key) != value
+    }
+
+    if not effective_changes and not address_update:
       return office
 
-    if "name" in update_dict and update_dict["name"] != office.name:
-      existing_office = await OfficeRepository.get_by_name(db, update_dict["name"])
-      if existing_office:
-        raise ConflictException(
-          "An office with this name already exists",
-          error_code="OFFICE_NAME_ALREADY_EXISTS",
-        )
+    OfficeRepository.add_history(
+      db,
+      OfficeService._create_history_snapshot(
+        office,
+        admin_id,
+        update_data.change_reason,
+      ),
+    )
 
-    if update_data.address:
+    if address_update:
       if office.address:
         AddressService.update_address_entity(office.address, update_data.address)
       else:
@@ -127,28 +145,12 @@ class OfficeService:
         db.add(new_address)
         await db.flush()
         office.address_id = new_address.id
+        office.address = new_address
 
-    for key, value in update_dict.items():
-      if key != "address":
-        setattr(office, key, value)
+    for key, value in effective_changes.items():
+      setattr(office, key, value)
 
     OfficeRepository.add(db, office)
-    OfficeRepository.add_history(
-      db,
-      OfficeHistory(
-        office_id=office.id,
-        name=office.name,
-        description=office.description,
-        contact_email=office.contact_email,
-        phone=office.phone,
-        services=office.services,
-        opening_hours=office.opening_hours,
-        address_snapshot=OfficeService._format_address_snapshot(office.address),
-        changed_by_user_id=admin_id,
-        change_reason="Office details updated via API",
-      ),
-    )
-
     await db.flush()
     await db.refresh(office)
     return office
@@ -158,6 +160,7 @@ class OfficeService:
     db: AsyncSession,
     office_id: uuid.UUID,
     admin_id: uuid.UUID,
+    change_reason: str,
   ) -> None:
     office = await OfficeService.get_office_by_id(db, office_id)
 
@@ -167,25 +170,24 @@ class OfficeService:
         error_code="OFFICE_ALREADY_DEACTIVATED",
       )
 
-    office.is_active = False
-    office.deactivated_at = datetime.now(timezone.utc)
+    if await UserRepository.has_active_users_for_office(db, office.id):
+      raise ConflictException(
+        "Office cannot be deactivated while active users are assigned to it.",
+        error_code="OFFICE_HAS_ACTIVE_USERS",
+      )
 
-    OfficeRepository.add(db, office)
     OfficeRepository.add_history(
       db,
-      OfficeHistory(
-        office_id=office.id,
-        name=office.name,
-        description=office.description,
-        contact_email=office.contact_email,
-        phone=office.phone,
-        services=office.services,
-        opening_hours=office.opening_hours,
-        address_snapshot=OfficeService._format_address_snapshot(office.address),
-        changed_by_user_id=admin_id,
-        change_reason="Office deactivated",
+      OfficeService._create_history_snapshot(
+        office,
+        admin_id,
+        change_reason,
       ),
     )
+
+    office.is_active = False
+    office.deactivated_at = datetime.now(timezone.utc)
+    OfficeRepository.add(db, office)
     await db.flush()
 
   @staticmethod

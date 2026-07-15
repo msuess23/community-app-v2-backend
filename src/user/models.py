@@ -42,6 +42,9 @@ class UserHistory(Base):
   first_name = Column(String)
   last_name = Column(String)
   role = Column(Enum(Role))
+  office_id = Column(UUID(as_uuid=True), ForeignKey("offices.id"), nullable=True)
+  is_active = Column(Boolean, nullable=False, default=True)
+  deactivated_at = Column(DateTime(timezone=True), nullable=True)
   
   # Audit metadata
   changed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

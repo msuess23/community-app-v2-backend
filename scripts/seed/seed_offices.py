@@ -1,13 +1,11 @@
-import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.office.models import Office, OfficeHistory
+from src.office.models import Office
 from src.office.repository import OfficeRepository
-from src.office.service import OfficeService
 from src.address.service import AddressService
 from src.address.schemas import AddressCreate
 
-async def run_office_seeder(db: AsyncSession, system_user_id: uuid.UUID):
+async def run_office_seeder(db: AsyncSession):
   """
   Seeds the database with default offices if they do not exist.
   """
@@ -87,20 +85,6 @@ async def run_office_seeder(db: AsyncSession, system_user_id: uuid.UUID):
       OfficeRepository.add(db, new_office)
       await db.flush() # Flush to get the UUID for history
       
-      history_entry = OfficeHistory(
-        office_id=new_office.id,
-        name=new_office.name,
-        description=new_office.description,
-        contact_email=new_office.contact_email,
-        phone=new_office.phone,
-        services=new_office.services,
-        opening_hours=new_office.opening_hours,
-        address_snapshot=OfficeService._format_address_snapshot(address_entity),
-        changed_by_user_id=system_user_id,
-        change_reason="System Seed: Default Office"
-      )
-      OfficeRepository.add_history(db, history_entry)
-      addr_status = "with Address" if address_entity else "without Address"
       print(f"  -> Created Office: {new_office.name}")
     else:
       print(f"  -> Skipped: {office_data['name']} (Already exists)")

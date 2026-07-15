@@ -1,12 +1,11 @@
-import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.user.models import User, UserHistory, Role
+from src.user.models import User, Role
 from src.user.repository import UserRepository
 from src.office.repository import OfficeRepository
 from src.core.security import get_password_hash
 
-async def run_user_seeder(db: AsyncSession, system_user_id: uuid.UUID):
+async def run_user_seeder(db: AsyncSession):
   """
   Seeds the database with default users for each role (Admin, Manager, Officer, Citizen).
   Links the Officer to the 'Bauamt' office.
@@ -92,7 +91,7 @@ async def run_user_seeder(db: AsyncSession, system_user_id: uuid.UUID):
       "first_name": "Olga",
       "last_name": "Officer",
       "role": Role.OFFICER,
-      "office_id": bauamt.id
+      "office_id": buergeramt.id
     },
     # CITIZEN
     {
@@ -134,16 +133,6 @@ async def run_user_seeder(db: AsyncSession, system_user_id: uuid.UUID):
       UserRepository.add(db, new_user)
       await db.flush() # Flush to get the UUID for history
       
-      history_entry = UserHistory(
-        user_id=new_user.id,
-        email=new_user.email,
-        first_name=new_user.first_name,
-        last_name=new_user.last_name,
-        role=new_user.role,
-        changed_by_user_id=system_user_id,
-        change_reason="System Seed: Default User"
-      )
-      UserRepository.add_history(db, history_entry)
       print(f"  -> Created User: {new_user.email} ({new_user.role})")
     else:
       print(f"  -> Skipped: {user_data['email']} (Already exists)")

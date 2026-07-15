@@ -21,7 +21,7 @@ from src.core.security import (
   normalize_email,
   verify_password,
 )
-from src.user.models import User, UserHistory
+from src.user.models import User
 from src.user.repository import UserRepository
 from src.user.schemas import UserCreate
 
@@ -46,21 +46,6 @@ class AuthService:
       last_name=user_data.last_name,
     )
     UserRepository.add(db, new_user)
-    await db.flush()
-
-    UserRepository.add_history(
-      db,
-      UserHistory(
-        user_id=new_user.id,
-        email=new_user.email,
-        first_name=new_user.first_name,
-        last_name=new_user.last_name,
-        role=new_user.role,
-        changed_by_user_id=new_user.id,
-        change_reason="Initial Registration",
-      ),
-    )
-
     await db.flush()
     await db.refresh(new_user)
     return new_user

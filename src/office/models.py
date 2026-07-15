@@ -43,6 +43,7 @@ class OfficeHistory(Base):
   services = Column(ARRAY(String), default=list)
   opening_hours = Column(JSONB, default=dict)
   address_snapshot = Column(String, nullable=True)
+  is_active = Column(Boolean, nullable=False, default=True)
   changed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
   changed_by_user_id = Column(UUID(as_uuid=True))
   change_reason = Column(String, nullable=False)

@@ -7,7 +7,13 @@ from datetime import datetime
 from src.core.database import get_db
 from src.auth.dependencies import role_required, get_current_user
 from src.user.models import Role, User
-from src.office.schemas import OfficeCreate, OfficeUpdate, OfficeResponse, OfficeHistoryResponse
+from src.office.schemas import (
+  OfficeCreate,
+  OfficeDeactivateRequest,
+  OfficeHistoryResponse,
+  OfficeResponse,
+  OfficeUpdate,
+)
 from src.office.service import OfficeService
 from src.core.filters import get_bbox_filter, LifecycleStatusFilter
 
@@ -82,6 +88,7 @@ async def update_office(
 @router.delete("/{office_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_office(
   office_id: uuid.UUID,
+  request: OfficeDeactivateRequest,
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(role_required(Role.ADMIN))
 ):
@@ -89,7 +96,12 @@ async def deactivate_office(
   Soft-deletes (deactivates) an office.
   Strictly restricted to administrators.
   """
-  await OfficeService.deactivate_office(db, office_id, current_user.id)
+  await OfficeService.deactivate_office(
+    db,
+    office_id,
+    current_user.id,
+    request.change_reason,
+  )
 
 
 @router.get("/{office_id}/history", response_model=List[OfficeHistoryResponse])
