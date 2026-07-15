@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,8 @@ from src.user.schemas import UserUpdate, AdminUserUpdate
 from src.core.exceptions import DomainException
 from src.core.filters import LifecycleStatusFilter
 from src.user.repository import UserRepository
+from src.auth.repository import AuthRepository
+from src.core.security import get_password_hash
 
 class UserService:
   """
@@ -71,11 +74,21 @@ class UserService:
     # Citizens should not be listed in bulk unless requested by an Admin
     exclude_citizens = current_user.role != Role.ADMIN
     
-    # Officers are restricted to their own office namespace
-    force_office_id = current_user.office_id if current_user.role == Role.OFFICER else None
-    
+    # Officers and managers are restricted to their own office namespace.
+    force_office_id = (
+      current_user.office_id
+      if current_user.role in {Role.OFFICER, Role.MANAGER}
+      else None
+    )
+
+    # Non-admin staff may only browse active employee accounts.
+    effective_status = (
+      status if current_user.role == Role.ADMIN else LifecycleStatusFilter.ACTIVE
+    )
+
     return await UserRepository.get_all(
-      db, skip, limit, office_id, role, exclude_citizens, force_office_id, status, search
+      db, skip, limit, office_id, role, exclude_citizens, force_office_id,
+      effective_status, search
     )
 
   @staticmethod
@@ -89,21 +102,15 @@ class UserService:
   @staticmethod
   async def deactivate_user(db: AsyncSession, user_id: uuid.UUID, admin_id: uuid.UUID):
     """
-    Deactivates a user account and applies immediate Stage 1 anonymization 
-    to protect live data exposure.
+    Deactivates an account, invalidates refresh sessions and anonymizes only
+    citizen accounts in the live user table.
     """
     user = await UserService.get_user_by_id(db, user_id)
-    
+
     if not user.is_active:
       raise DomainException("User is already deactivated", status_code=400)
-      
-    user.is_active = False
-    user.deactivated_at = datetime.now(timezone.utc)
-    user.email = f"deleted@local.com"
-    user.first_name = "gelöschter"
-    user.last_name = "Nutzer"
-    user.hashed_password = "UNUSABLE_PASSWORD"
-    
+
+    # Preserve the identifiable state before mutating the live user record.
     history_entry = UserHistory(
       user_id=user.id,
       email=user.email,
@@ -113,9 +120,19 @@ class UserService:
       changed_by_user_id=admin_id,
       change_reason="User deactivated by Administrator"
     )
-    
-    UserRepository.add(db, user)
     UserRepository.add_history(db, history_entry)
+
+    user.is_active = False
+    user.deactivated_at = datetime.now(timezone.utc)
+    user.hashed_password = get_password_hash(secrets.token_urlsafe(32))
+
+    if user.role == Role.CITIZEN:
+      user.email = f"deleted+{user.id}@users.invalid"
+      user.first_name = "gelöschter"
+      user.last_name = "Nutzer"
+
+    UserRepository.add(db, user)
+    await AuthRepository.delete_refresh_tokens_by_user_id(db, user.id)
     await db.commit()
 
   @staticmethod

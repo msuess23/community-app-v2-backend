@@ -42,7 +42,7 @@ async def get_all_users(
   skip: int = 0, 
   limit: int = 100,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN", "MANAGER", "DISPATCHER", "OFFICER"]))
+  current_user: User = Depends(role_required(Role.ADMIN, Role.MANAGER, Role.DISPATCHER, Role.OFFICER))
 ):
   """
   Returns a list of users.
@@ -68,7 +68,7 @@ async def update_user_by_admin(
   user_id: uuid.UUID,
   update_data: AdminUserUpdate,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"]))
+  current_user: User = Depends(role_required(Role.ADMIN))
 ):
   """
   Updates a specific user's profile, including administrative fields like role and office_id.
@@ -82,7 +82,7 @@ async def update_user_by_admin(
 async def deactivate_user(
   user_id: uuid.UUID,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"]))
+  current_user: User = Depends(role_required(Role.ADMIN))
 ):
   """
   Soft-deletes (deactivates) a user and scrubs their live data.
@@ -96,7 +96,7 @@ async def get_user_history(
   start_date: Optional[datetime] = Query(None, description="Start of the validity period"),
   end_date: Optional[datetime] = Query(None, description="End of the validity period"),
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"]))
+  current_user: User = Depends(role_required(Role.ADMIN))
 ):
   """
   Retrieves the audit trail/history for a specific user profile.

@@ -6,7 +6,7 @@ from datetime import datetime
 
 from src.core.database import get_db
 from src.auth.dependencies import role_required, get_current_user
-from src.user.models import User
+from src.user.models import Role, User
 from src.office.schemas import OfficeCreate, OfficeUpdate, OfficeResponse, OfficeHistoryResponse
 from src.office.service import OfficeService
 from src.core.filters import get_bbox_filter, LifecycleStatusFilter
@@ -52,7 +52,7 @@ async def get_office(
 async def create_office(
   office_data: OfficeCreate,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"]))
+  current_user: User = Depends(role_required(Role.ADMIN))
 ):
   """
   Creates a new office/department.
@@ -66,7 +66,7 @@ async def update_office(
   office_id: uuid.UUID,
   update_data: OfficeUpdate,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"]))
+  current_user: User = Depends(role_required(Role.ADMIN))
 ):
   """
   Updates details of an existing office.
@@ -83,7 +83,7 @@ async def update_office(
 async def deactivate_office(
   office_id: uuid.UUID,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"]))
+  current_user: User = Depends(role_required(Role.ADMIN))
 ):
   """
   Soft-deletes (deactivates) an office.
@@ -98,7 +98,7 @@ async def get_office_history(
   start_date: Optional[datetime] = Query(None, description="Start of the validity period"),
   end_date: Optional[datetime] = Query(None, description="End of the validity period"),
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(["ADMIN"]))
+  current_user: User = Depends(role_required(Role.ADMIN))
 ):
   """
   Retrieves the audit trail/history for a specific office.

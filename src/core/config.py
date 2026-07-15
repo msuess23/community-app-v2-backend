@@ -1,3 +1,4 @@
+from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import computed_field
 
@@ -8,7 +9,7 @@ class Settings(BaseSettings):
     
   # Security and JWT configuration
   SECRET_KEY: str
-  ALGORITHM: str
+  ALGORITHM: Literal["HS256"] = "HS256"
   ACCESS_TOKEN_EXPIRE_MINUTES: int
   REFRESH_TOKEN_EXPIRE_DAYS: int
 
@@ -19,12 +20,6 @@ class Settings(BaseSettings):
   POSTGRES_HOST: str
   POSTGRES_PORT: int
 
-  # Email Configuration (New)
-  SMTP_HOST: str = ""
-  SMTP_PORT: int = 587
-  SMTP_USER: str = ""
-  SMTP_PASSWORD: str = ""
-  SMTP_TLS: bool = True
 
   # Construct the DATABASE_URL dynamically from atomic variables
   @computed_field

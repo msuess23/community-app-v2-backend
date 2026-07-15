@@ -2,7 +2,7 @@ import uuid
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update
+from sqlalchemy import func, update
 from datetime import datetime
 
 from src.user.models import User, UserHistory, Role
@@ -16,8 +16,11 @@ class UserRepository:
 
   @staticmethod
   async def get_by_email(db: AsyncSession, email: str) -> Optional[User]:
-    """Fetches a user by email for authentication purposes."""
-    result = await db.execute(select(User).where(User.email == email))
+    """Fetches a user by their normalized, case-insensitive email."""
+    normalized_email = email.strip().lower()
+    result = await db.execute(
+      select(User).where(func.lower(User.email) == normalized_email)
+    )
     return result.scalar_one_or_none()
 
   @staticmethod

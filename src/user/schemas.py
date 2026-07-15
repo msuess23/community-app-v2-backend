@@ -1,16 +1,30 @@
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from datetime import datetime
 
-from src.user.models import Role
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
 from src.core.schemas import BaseMetadataResponse
+from src.core.security import ensure_bcrypt_compatible, normalize_email
+from src.user.models import Role
+
 
 class UserCreate(BaseModel):
   email: EmailStr
-  password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
+  password: str = Field(..., min_length=8, max_length=128)
   first_name: str = Field(..., min_length=2)
   last_name: str = Field(..., min_length=2)
+
+  @field_validator("email")
+  @classmethod
+  def normalize_email_value(cls, value: EmailStr) -> str:
+    return normalize_email(str(value))
+
+  @field_validator("password")
+  @classmethod
+  def validate_password_bytes(cls, value: str) -> str:
+    return ensure_bcrypt_compatible(value)
+
 
 class UserResponse(BaseMetadataResponse):
   id: UUID
@@ -19,21 +33,16 @@ class UserResponse(BaseMetadataResponse):
   last_name: str
   role: Role
   office_id: Optional[UUID] = None
-  
+
   model_config = ConfigDict(from_attributes=True)
 
+
 class UserUpdate(BaseModel):
-  """
-  Fields that a standard user is allowed to update on their own profile.
-  """
   first_name: Optional[str] = Field(None, min_length=2)
   last_name: Optional[str] = Field(None, min_length=2)
 
+
 class AdminUserUpdate(UserUpdate):
-  """
-  Fields that an administrator is allowed to update on any user profile.
-  Inherits from UserUpdate to include first_name and last_name.
-  """
   role: Optional[Role] = None
   office_id: Optional[UUID] = None
 
@@ -48,4 +57,5 @@ class UserHistoryResponse(BaseModel):
   changed_by_user_id: UUID
   change_reason: str
   changed_at: datetime
+
   model_config = ConfigDict(from_attributes=True)

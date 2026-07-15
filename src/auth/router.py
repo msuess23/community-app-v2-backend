@@ -1,75 +1,76 @@
-from fastapi import APIRouter, Depends, Body, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 
-from src.core.config import settings
-from src.core.database import get_db
-from src.core.security import verify_password, create_access_token, create_refresh_token
-from src.core.exceptions import UnauthorizedException
-
-from src.user.repository import UserRepository
+from src.auth.schemas import (
+  ForgotPasswordRequest,
+  LogoutRequest,
+  RefreshTokenRequest,
+  ResetPasswordRequest,
+  TokenResponse,
+)
 from src.auth.service import AuthService
-from src.auth.models import BlacklistedToken
+from src.core.database import get_db
 from src.user.schemas import UserCreate, UserResponse
-from src.auth.schemas import TokenResponse, ForgotPasswordRequest, ResetPasswordRequest
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.BASE_URL}/auth/login")
+
 router = APIRouter()
 
-@router.post("/register", response_model=UserResponse, status_code=201)
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
-  user_data: UserCreate, 
-  db: AsyncSession = Depends(get_db)
+  user_data: UserCreate,
+  db: AsyncSession = Depends(get_db),
 ):
-  """Registers a new user."""
+  """Registers a citizen account."""
   return await AuthService.register_user(db, user_data)
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
   form_data: OAuth2PasswordRequestForm = Depends(),
-  db: AsyncSession = Depends(get_db)
+  db: AsyncSession = Depends(get_db),
 ):
-  """Authenticates a user and returns JWT tokens."""
-  user = await UserRepository.get_by_email(db, email=form_data.username)
-  if not user or not verify_password(form_data.password, user.hashed_password):
-    raise UnauthorizedException("Incorrect email or password")
-  
-  return TokenResponse(
-    access_token=create_access_token(subject=user.id),
-    refresh_token=create_refresh_token(subject=user.id)
-  )
+  """Authenticates an active user and creates a refresh session."""
+  return await AuthService.login(db, form_data.username, form_data.password)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(
+  request: RefreshTokenRequest,
+  db: AsyncSession = Depends(get_db),
+):
+  """Rotates a valid refresh token and returns a new token pair."""
+  return await AuthService.refresh(db, request.refresh_token)
 
 
 @router.post("/forgot-password-request")
 async def forgot_password_request(
-  request: ForgotPasswordRequest, 
-  background_tasks: BackgroundTasks,
-  db: AsyncSession = Depends(get_db)
+  request: ForgotPasswordRequest,
+  db: AsyncSession = Depends(get_db),
 ):
-  """Triggers an OTP email if the user exists."""
-  await AuthService.request_password_reset(db, request.email, background_tasks)
-  return {"message": "If this email exists, an OTP has been sent."}
+  """Creates a development OTP without revealing whether the email exists."""
+  await AuthService.request_password_reset(db, str(request.email))
+  return {
+    "message": "If this email exists, a reset code has been generated."
+  }
+
 
 @router.post("/reset-password")
 async def reset_password(
   request: ResetPasswordRequest,
-  db: AsyncSession = Depends(get_db)
+  db: AsyncSession = Depends(get_db),
 ):
-  """Resets the password using a valid OTP."""
+  """Changes the password using a valid one-time code."""
   await AuthService.reset_password(db, request)
   return {"message": "Password updated successfully."}
 
 
 @router.post("/logout")
 async def logout(
-  refresh_token: str | None = Body(None, embed=True),
-  token: str = Depends(oauth2_scheme),
-  db: AsyncSession = Depends(get_db)
+  request: LogoutRequest,
+  db: AsyncSession = Depends(get_db),
 ):
-  """
-  Invalidates the current access token (and optionally the refresh token).
-  Safe to call multiple times with the same token.
-  """
-  await AuthService.logout(db, access_token=token, refresh_token=refresh_token)
+  """Deletes the supplied refresh token. The operation is idempotent."""
+  await AuthService.logout(db, request.refresh_token)
   return {"message": "Successfully logged out."}
