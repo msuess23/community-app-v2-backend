@@ -1,4 +1,5 @@
 from typing import AsyncGenerator
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
@@ -6,12 +7,12 @@ from src.core.config import settings
 
 # Create async engine for PostgreSQL
 engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=30,
-    pool_recycle=1800
+  settings.DATABASE_URL,
+  echo=False,
+  pool_size=10,
+  max_overflow=20,
+  pool_timeout=30,
+  pool_recycle=1800,
 )
 
 # Configure session factory
@@ -26,13 +27,13 @@ AsyncSessionLocal = async_sessionmaker(
 # Base class for ORM models
 Base = declarative_base()
 
-# FastAPI dependency for DB sessions
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+  """Provides one transaction-scoped session per HTTP request."""
   async with AsyncSessionLocal() as session:
     try:
       yield session
+      await session.commit()
     except Exception:
       await session.rollback()
       raise
-    finally:
-      await session.close()

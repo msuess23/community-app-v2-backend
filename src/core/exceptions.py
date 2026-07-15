@@ -1,41 +1,79 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
-from fastapi import Request, status
-from fastapi.responses import JSONResponse
+from fastapi import status
+
+
+ErrorDetails = list[dict[str, Any]]
 
 
 class DomainException(Exception):
-  """Base class for application errors with a stable API representation."""
+  """Base class for expected application errors."""
 
   def __init__(
     self,
     message: str,
-    error_code: str = "INTERNAL_SERVER_ERROR",
-    status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
-    details: Optional[Dict[str, Any]] = None,
-  ):
+    *,
+    error_code: str = "DOMAIN_ERROR",
+    status_code: int = status.HTTP_400_BAD_REQUEST,
+    details: ErrorDetails | None = None,
+  ) -> None:
     self.message = message
     self.error_code = error_code
     self.status_code = status_code
-    self.details = details
-    super().__init__(self.message)
+    self.details = details or []
+    super().__init__(message)
 
 
 class ResourceNotFoundException(DomainException):
-  def __init__(self, message: str = "The requested resource was not found."):
+  def __init__(
+    self,
+    message: str = "The requested resource was not found.",
+    *,
+    error_code: str = "RESOURCE_NOT_FOUND",
+  ) -> None:
     super().__init__(
-      message=message,
-      error_code="RESOURCE_NOT_FOUND",
+      message,
+      error_code=error_code,
       status_code=status.HTTP_404_NOT_FOUND,
+    )
+
+
+class ConflictException(DomainException):
+  def __init__(
+    self,
+    message: str = "The request conflicts with the current resource state.",
+    *,
+    error_code: str = "RESOURCE_CONFLICT",
+  ) -> None:
+    super().__init__(
+      message,
+      error_code=error_code,
+      status_code=status.HTTP_409_CONFLICT,
+    )
+
+
+class DomainValidationException(DomainException):
+  def __init__(
+    self,
+    message: str = "The request contains invalid data.",
+    *,
+    error_code: str = "DOMAIN_VALIDATION_ERROR",
+    details: ErrorDetails | None = None,
+  ) -> None:
+    super().__init__(
+      message,
+      error_code=error_code,
+      status_code=422,
+      details=details,
     )
 
 
 class UnauthorizedException(DomainException):
   """Authentication failed because credentials are missing or invalid."""
 
-  def __init__(self, message: str = "Could not validate credentials"):
+  def __init__(self, message: str = "Could not validate credentials") -> None:
     super().__init__(
-      message=message,
+      message,
       error_code="UNAUTHORIZED",
       status_code=status.HTTP_401_UNAUTHORIZED,
     )
@@ -44,40 +82,17 @@ class UnauthorizedException(DomainException):
 class ForbiddenException(DomainException):
   """The authenticated user is not allowed to access the resource."""
 
-  def __init__(self, message: str = "Insufficient permissions"):
+  def __init__(self, message: str = "Insufficient permissions") -> None:
     super().__init__(
-      message=message,
+      message,
       error_code="FORBIDDEN",
       status_code=status.HTTP_403_FORBIDDEN,
     )
 
 
-class WorkflowValidationException(DomainException):
-  def __init__(self, message: str = "Invalid workflow operation."):
+class WorkflowValidationException(DomainValidationException):
+  def __init__(self, message: str = "Invalid workflow operation.") -> None:
     super().__init__(
-      message=message,
+      message,
       error_code="WORKFLOW_VALIDATION_FAILED",
-      status_code=status.HTTP_400_BAD_REQUEST,
     )
-
-
-async def domain_exception_handler(
-  request: Request,
-  exc: DomainException,
-) -> JSONResponse:
-  content: Dict[str, Any] = {
-    "error_code": exc.error_code,
-    "message": exc.message,
-  }
-  if exc.details:
-    content["details"] = exc.details
-
-  headers = None
-  if exc.status_code == status.HTTP_401_UNAUTHORIZED:
-    headers = {"WWW-Authenticate": "Bearer"}
-
-  return JSONResponse(
-    status_code=exc.status_code,
-    content=content,
-    headers=headers,
-  )

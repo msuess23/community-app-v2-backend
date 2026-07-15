@@ -1,9 +1,20 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.core.config import settings
-from src.core.exceptions import DomainException, domain_exception_handler
+from sqlalchemy.exc import IntegrityError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from src.core.error_handlers import (
+  domain_exception_handler,
+  http_exception_handler,
+  integrity_error_handler,
+  request_validation_exception_handler,
+  unexpected_exception_handler,
+)
+from src.core.exceptions import DomainException
 from src.core.scheduler import setup_scheduler, shutdown_scheduler
 
 import src.auth.models
@@ -42,8 +53,12 @@ app.add_middleware(
   allow_headers=["*"],
 )
 
-# Register the global domain exception handler
+# Register the global exception handlers
 app.add_exception_handler(DomainException, domain_exception_handler)
+app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(IntegrityError, integrity_error_handler)
+app.add_exception_handler(Exception, unexpected_exception_handler)
 
 # --- Router Registration ---
 app.include_router(

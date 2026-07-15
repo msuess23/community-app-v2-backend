@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import DomainException
+from src.core.exceptions import ResourceNotFoundException
 from src.address.models import Address
 from src.address.schemas import AddressCreate, AddressUpdate
 from src.address.repository import AddressRepository
@@ -47,5 +47,8 @@ class AddressService:
     """
     address = await AddressRepository.get_by_id(db, address_id)
     if not address:
-      raise DomainException("Address not found", status_code=404)
+      raise ResourceNotFoundException(
+        "Address not found",
+        error_code="ADDRESS_NOT_FOUND",
+      )
     return address

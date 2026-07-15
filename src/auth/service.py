@@ -8,7 +8,11 @@ from src.auth.models import PasswordReset, RefreshToken
 from src.auth.repository import AuthRepository
 from src.auth.schemas import ResetPasswordRequest, TokenResponse
 from src.core.config import settings
-from src.core.exceptions import DomainException, UnauthorizedException
+from src.core.exceptions import (
+  ConflictException,
+  DomainValidationException,
+  UnauthorizedException,
+)
 from src.core.security import (
   create_access_token,
   generate_refresh_token,
@@ -30,10 +34,9 @@ class AuthService:
     email = normalize_email(str(user_data.email))
     existing_user = await UserRepository.get_by_email(db, email)
     if existing_user:
-      raise DomainException(
+      raise ConflictException(
         "Email already registered",
-        error_code="EMAIL_EXISTS",
-        status_code=400,
+        error_code="EMAIL_ALREADY_REGISTERED",
       )
 
     new_user = User(
@@ -58,7 +61,7 @@ class AuthService:
       ),
     )
 
-    await db.commit()
+    await db.flush()
     await db.refresh(new_user)
     return new_user
 
@@ -84,14 +87,10 @@ class AuthService:
       raise UnauthorizedException("Invalid refresh token")
 
     if stored_token.expires_at <= datetime.now(timezone.utc):
-      await AuthRepository.delete_refresh_token_by_hash(db, stored_token.token_hash)
-      await db.commit()
       raise UnauthorizedException("Refresh token has expired")
 
     user = await UserRepository.get_by_id(db, stored_token.user_id)
     if user is None or not user.is_active:
-      await AuthRepository.delete_refresh_token_by_hash(db, stored_token.token_hash)
-      await db.commit()
       raise UnauthorizedException("Invalid refresh token")
 
     await AuthRepository.delete_refresh_token_by_hash(db, stored_token.token_hash)
@@ -101,7 +100,6 @@ class AuthService:
   async def logout(db: AsyncSession, refresh_token: str) -> None:
     """Deletes the supplied refresh token. Repeated calls are intentionally harmless."""
     await AuthRepository.delete_refresh_token_by_hash(db, hash_token(refresh_token))
-    await db.commit()
 
   @staticmethod
   async def request_password_reset(db: AsyncSession, email: str) -> None:
@@ -122,7 +120,7 @@ class AuthService:
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
       ),
     )
-    await db.commit()
+    await db.flush()
 
     print(f"[DEV] Password reset OTP for {normalized_email}: {otp_code}")
 
@@ -134,42 +132,30 @@ class AuthService:
       normalized_email,
     )
 
-    if reset_record is None:
-      raise DomainException(
+    if reset_record is None or reset_record.expires_at <= datetime.now(timezone.utc):
+      raise DomainValidationException(
         "Invalid or expired OTP",
         error_code="INVALID_OTP",
-        status_code=400,
-      )
-
-    if reset_record.expires_at <= datetime.now(timezone.utc):
-      await AuthRepository.delete_password_reset_by_id(db, reset_record.id)
-      await db.commit()
-      raise DomainException(
-        "Invalid or expired OTP",
-        error_code="INVALID_OTP",
-        status_code=400,
       )
 
     if not verify_password(data.otp, reset_record.otp_hash):
-      raise DomainException(
+      raise DomainValidationException(
         "Invalid or expired OTP",
         error_code="INVALID_OTP",
-        status_code=400,
       )
 
     user = await UserRepository.get_by_email(db, normalized_email)
     if user is None or not user.is_active:
-      raise DomainException(
+      raise DomainValidationException(
         "Invalid or expired OTP",
         error_code="INVALID_OTP",
-        status_code=400,
       )
 
     user.hashed_password = get_password_hash(data.new_password)
     UserRepository.add(db, user)
     await AuthRepository.delete_refresh_tokens_by_user_id(db, user.id)
     await AuthRepository.delete_password_reset_by_id(db, reset_record.id)
-    await db.commit()
+    await db.flush()
 
   @staticmethod
   async def _create_session(db: AsyncSession, user: User) -> TokenResponse:
@@ -184,7 +170,7 @@ class AuthService:
         ),
       ),
     )
-    await db.commit()
+    await db.flush()
 
     return TokenResponse(
       access_token=create_access_token(subject=user.id),
