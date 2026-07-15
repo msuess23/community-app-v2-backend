@@ -1,12 +1,15 @@
 import uuid
-from typing import List, Optional, Tuple
+from datetime import datetime
+from typing import Optional, Tuple
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
 
+from src.auth.dependencies import get_optional_current_user, role_required
 from src.core.database import get_db
-from src.auth.dependencies import role_required, get_current_user
-from src.user.models import Role, User
+from src.core.filters import LifecycleStatusFilter, SortOrder, get_bbox_filter
+from src.core.schemas import PaginatedResponse
+from src.office.models import OfficeSortField
 from src.office.schemas import (
   OfficeCreate,
   OfficeDeactivateRequest,
@@ -15,28 +18,42 @@ from src.office.schemas import (
   OfficeUpdate,
 )
 from src.office.service import OfficeService
-from src.core.filters import get_bbox_filter, LifecycleStatusFilter
+from src.user.models import Role, User
+
 
 router = APIRouter()
 
 
-# --- Public Endpoints (no auth required) ---
-
-@router.get("", response_model=List[OfficeResponse])
+@router.get("", response_model=PaginatedResponse[OfficeResponse])
 async def get_all_offices(
-  q: Optional[str] = Query(None, description="Search term for office name or description"),
+  q: Optional[str] = Query(
+    None,
+    max_length=200,
+    description="Search term for name, description or contact email",
+  ),
   bbox: Optional[Tuple[float, float, float, float]] = Depends(get_bbox_filter),
-  skip: int = 0,
-  limit: int = 100,
-  status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
+  status_filter: LifecycleStatusFilter = Query(
+    LifecycleStatusFilter.ACTIVE,
+    alias="status",
+  ),
+  page: int = Query(1, ge=1),
+  size: int = Query(20, ge=1, le=100),
+  sort_by: OfficeSortField = OfficeSortField.NAME,
+  order: SortOrder = SortOrder.ASC,
   db: AsyncSession = Depends(get_db),
+  current_user: User | None = Depends(get_optional_current_user),
 ):
-  """
-  Retrieves a list of active offices. 
-  Publicly accessible.
-  """
+  """Lists offices; only admins may include inactive lifecycle states."""
   return await OfficeService.get_all_offices(
-    db=db, skip=skip, limit=limit, status=status, search=q, bbox=bbox
+    db,
+    current_user=current_user,
+    page=page,
+    size=size,
+    status=status_filter,
+    search=q,
+    bbox=bbox,
+    sort_by=sort_by,
+    order=order,
   )
 
 
@@ -44,26 +61,22 @@ async def get_all_offices(
 async def get_office(
   office_id: uuid.UUID,
   db: AsyncSession = Depends(get_db),
+  current_user: User | None = Depends(get_optional_current_user),
 ):
-  """
-  Retrieves specific details of a single office.
-  Publicly accessible.
-  """
-  return await OfficeService.get_office_by_id(db, office_id)
+  include_inactive = current_user is not None and current_user.role == Role.ADMIN
+  return await OfficeService.get_office_by_id(
+    db,
+    office_id,
+    include_inactive=include_inactive,
+  )
 
-
-# --- Admin Endpoints ---
 
 @router.post("", response_model=OfficeResponse, status_code=status.HTTP_201_CREATED)
 async def create_office(
   office_data: OfficeCreate,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(Role.ADMIN))
+  current_user: User = Depends(role_required(Role.ADMIN)),
 ):
-  """
-  Creates a new office/department.
-  Strictly restricted to administrators.
-  """
   return await OfficeService.create_office(db, office_data, current_user.id)
 
 
@@ -72,17 +85,19 @@ async def update_office(
   office_id: uuid.UUID,
   update_data: OfficeUpdate,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(Role.ADMIN))
+  current_user: User = Depends(role_required(Role.ADMIN)),
 ):
-  """
-  Updates details of an existing office.
-  Triggers a history snapshot. Strictly restricted to administrators.
-  """
-  # Fetch the existing office first
-  target_office = await OfficeService.get_office_by_id(db, office_id)
-  
-  # Apply updates via the service
-  return await OfficeService.update_office(db, target_office, update_data, current_user.id)
+  target_office = await OfficeService.get_office_by_id(
+    db,
+    office_id,
+    include_inactive=True,
+  )
+  return await OfficeService.update_office(
+    db,
+    target_office,
+    update_data,
+    current_user.id,
+  )
 
 
 @router.delete("/{office_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -90,12 +105,8 @@ async def deactivate_office(
   office_id: uuid.UUID,
   request: OfficeDeactivateRequest,
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(Role.ADMIN))
+  current_user: User = Depends(role_required(Role.ADMIN)),
 ):
-  """
-  Soft-deletes (deactivates) an office.
-  Strictly restricted to administrators.
-  """
   await OfficeService.deactivate_office(
     db,
     office_id,
@@ -104,16 +115,12 @@ async def deactivate_office(
   )
 
 
-@router.get("/{office_id}/history", response_model=List[OfficeHistoryResponse])
+@router.get("/{office_id}/history", response_model=list[OfficeHistoryResponse])
 async def get_office_history(
   office_id: uuid.UUID,
-  start_date: Optional[datetime] = Query(None, description="Start of the validity period"),
-  end_date: Optional[datetime] = Query(None, description="End of the validity period"),
+  start_date: Optional[datetime] = Query(None),
+  end_date: Optional[datetime] = Query(None),
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(role_required(Role.ADMIN))
+  _current_user: User = Depends(role_required(Role.ADMIN)),
 ):
-  """
-  Retrieves the audit trail/history for a specific office.
-  Strictly restricted to administrators.
-  """
   return await OfficeService.get_office_history(db, office_id, start_date, end_date)

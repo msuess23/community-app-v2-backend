@@ -48,7 +48,7 @@ async def test_admin_cannot_deactivate_own_account(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_citizen_deactivation_archives_old_state_and_anonymizes_live_user(monkeypatch):
+async def test_citizen_deactivation_stores_final_anonymized_state(monkeypatch):
   db = make_db()
   citizen = make_user(Role.CITIZEN)
   histories = []
@@ -70,7 +70,6 @@ async def test_citizen_deactivation_archives_old_state_and_anonymizes_live_user(
     delete_sessions,
   )
 
-  old_email = citizen.email
   await UserService.deactivate_user(
     db,
     citizen.id,
@@ -78,8 +77,8 @@ async def test_citizen_deactivation_archives_old_state_and_anonymizes_live_user(
     "Citizen requested account deletion",
   )
 
-  assert histories[0].email == old_email
-  assert histories[0].is_active is True
+  assert histories[0].email == f"deleted+{citizen.id}@users.invalid"
+  assert histories[0].is_active is False
   assert citizen.email == f"deleted+{citizen.id}@users.invalid"
   assert citizen.first_name == "gelöschter"
   assert citizen.last_name == "Nutzer"

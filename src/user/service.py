@@ -12,10 +12,11 @@ from src.core.exceptions import (
   ForbiddenException,
   ResourceNotFoundException,
 )
-from src.core.filters import LifecycleStatusFilter
+from src.core.filters import LifecycleStatusFilter, SortOrder
+from src.core.schemas import PaginatedResponse
 from src.core.security import get_password_hash
 from src.office.repository import OfficeRepository
-from src.user.models import Role, User, UserHistory
+from src.user.models import Role, User, UserHistory, UserSortField
 from src.user.repository import UserRepository
 from src.user.schemas import AdminUserUpdate, UserUpdate
 
@@ -26,13 +27,15 @@ class UserService:
   STAFF_ROLES_REQUIRING_OFFICE = {Role.OFFICER, Role.MANAGER}
 
   @staticmethod
-  def _create_history_snapshot(
+  def add_history_snapshot(
+    db: AsyncSession,
     user: User,
+    *,
     changed_by_user_id: uuid.UUID,
     change_reason: str,
   ) -> UserHistory:
-    """Creates an old-state snapshot before the live entity is changed."""
-    return UserHistory(
+    """Stages a snapshot of the currently valid user state."""
+    snapshot = UserHistory(
       user_id=user.id,
       email=user.email,
       first_name=user.first_name,
@@ -40,10 +43,11 @@ class UserService:
       role=user.role,
       office_id=user.office_id,
       is_active=user.is_active,
-      deactivated_at=user.deactivated_at,
       changed_by_user_id=changed_by_user_id,
       change_reason=change_reason,
     )
+    UserRepository.add_history(db, snapshot)
+    return snapshot
 
   @staticmethod
   async def _validate_resulting_role_and_office(
@@ -140,19 +144,17 @@ class UserService:
     if not effective_changes:
       return user
 
-    UserRepository.add_history(
-      db,
-      UserService._create_history_snapshot(
-        user,
-        changed_by_user_id,
-        change_reason,
-      ),
-    )
-
     for key, value in effective_changes.items():
       setattr(user, key, value)
 
     UserRepository.add(db, user)
+    await db.flush()
+    UserService.add_history_snapshot(
+      db,
+      user,
+      changed_by_user_id=changed_by_user_id,
+      change_reason=change_reason,
+    )
     await db.flush()
     await db.refresh(user)
     return user
@@ -161,13 +163,16 @@ class UserService:
   async def get_all_users(
     db: AsyncSession,
     current_user: User,
-    skip: int = 0,
-    limit: int = 100,
+    *,
+    page: int = 1,
+    size: int = 20,
     office_id: Optional[uuid.UUID] = None,
     role: Optional[Role] = None,
     status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
     search: Optional[str] = None,
-  ):
+    sort_by: UserSortField = UserSortField.LAST_NAME,
+    order: SortOrder = SortOrder.ASC,
+  ) -> PaginatedResponse:
     exclude_citizens = current_user.role != Role.ADMIN
     force_office_id = (
       current_user.office_id
@@ -178,17 +183,20 @@ class UserService:
       status if current_user.role == Role.ADMIN else LifecycleStatusFilter.ACTIVE
     )
 
-    return await UserRepository.get_all(
+    users, total = await UserRepository.get_page(
       db,
-      skip,
-      limit,
-      office_id,
-      role,
-      exclude_citizens,
-      force_office_id,
-      effective_status,
-      search,
+      page=page,
+      size=size,
+      office_id=office_id,
+      role=role,
+      exclude_citizens=exclude_citizens,
+      force_office_id=force_office_id,
+      status=effective_status,
+      search=search,
+      sort_by=sort_by,
+      order=order,
     )
+    return PaginatedResponse.create(data=users, total=total, page=page, size=size)
 
   @staticmethod
   async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User:
@@ -218,15 +226,6 @@ class UserService:
         error_code="USER_ALREADY_DEACTIVATED",
       )
 
-    UserRepository.add_history(
-      db,
-      UserService._create_history_snapshot(
-        user,
-        admin_id,
-        change_reason,
-      ),
-    )
-
     user.is_active = False
     user.deactivated_at = datetime.now(timezone.utc)
     user.hashed_password = get_password_hash(secrets.token_urlsafe(32))
@@ -238,6 +237,13 @@ class UserService:
 
     UserRepository.add(db, user)
     await AuthRepository.delete_refresh_tokens_by_user_id(db, user.id)
+    await db.flush()
+    UserService.add_history_snapshot(
+      db,
+      user,
+      changed_by_user_id=admin_id,
+      change_reason=change_reason,
+    )
     await db.flush()
 
   @staticmethod

@@ -45,11 +45,11 @@ async def test_duplicate_office_names_are_allowed(monkeypatch):
   )
 
   assert result.name == "Same Name"
-  db.flush.assert_awaited_once()
+  assert db.flush.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_office_update_archives_old_state(monkeypatch):
+async def test_office_update_stores_resulting_state(monkeypatch):
   db = make_db()
   office = make_office()
   histories = []
@@ -71,7 +71,7 @@ async def test_office_update_archives_old_state(monkeypatch):
   )
 
   assert office.description == "New description"
-  assert histories[0].description == "Old description"
+  assert histories[0].description == "New description"
   assert histories[0].is_active is True
   assert histories[0].change_reason == "Responsibilities changed"
 

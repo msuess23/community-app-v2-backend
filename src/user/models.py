@@ -14,6 +14,14 @@ class Role(str, enum.Enum):
   MANAGER = "MANAGER"
   ADMIN = "ADMIN"
 
+class UserSortField(str, enum.Enum):
+  CREATED_AT = "created_at"
+  EMAIL = "email"
+  FIRST_NAME = "first_name"
+  LAST_NAME = "last_name"
+  ROLE = "role"
+
+
 class User(Base):
   __tablename__ = "users"
 
@@ -44,7 +52,6 @@ class UserHistory(Base):
   role = Column(Enum(Role))
   office_id = Column(UUID(as_uuid=True), ForeignKey("offices.id"), nullable=True)
   is_active = Column(Boolean, nullable=False, default=True)
-  deactivated_at = Column(DateTime(timezone=True), nullable=True)
   
   # Audit metadata
   changed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

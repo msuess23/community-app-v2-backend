@@ -13,6 +13,10 @@ from src.user.repository import UserRepository
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.BASE_URL}/auth/login")
+optional_oauth2_scheme = OAuth2PasswordBearer(
+  tokenUrl=f"{settings.BASE_URL}/auth/login",
+  auto_error=False,
+)
 
 
 async def get_current_user(
@@ -32,6 +36,16 @@ async def get_current_user(
     raise UnauthorizedException("Could not validate credentials")
 
   return user
+
+
+async def get_optional_current_user(
+  token: str | None = Depends(optional_oauth2_scheme),
+  db: AsyncSession = Depends(get_db),
+) -> User | None:
+  """Returns the authenticated active user or None for anonymous requests."""
+  if token is None:
+    return None
+  return await get_current_user(token=token, db=db)
 
 
 def role_required(*allowed_roles: Role):

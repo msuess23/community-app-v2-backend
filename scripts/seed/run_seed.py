@@ -9,14 +9,17 @@ from scripts.seed.seed_users import run_user_seeder
 from src.core.database import AsyncSessionLocal
 
 
-async def main():
-  """Seeds offices first and users second in one transaction."""
+async def main() -> None:
+  """Seeds admin, offices and remaining users in one transaction."""
   print("Starting Database Seed Process...\n")
 
   async with AsyncSessionLocal() as db:
     try:
-      await run_office_seeder(db)
-      await run_user_seeder(db)
+      admin = await run_user_seeder(db, only_admin=True)
+      if admin is None:
+        raise RuntimeError("Admin seed account could not be created or loaded")
+      await run_office_seeder(db, admin.id)
+      await run_user_seeder(db, skip_admin=True)
       await db.commit()
       print("\nDatabase Seed Process Completed Successfully.")
     except Exception as exc:

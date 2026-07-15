@@ -97,8 +97,8 @@ async def test_admin_can_promote_citizen_to_officer_with_active_office(monkeypat
   assert result.role == Role.OFFICER
   assert result.office_id == office.id
   assert len(histories) == 1
-  assert histories[0].role == Role.CITIZEN
-  assert histories[0].office_id is None
+  assert histories[0].role == Role.OFFICER
+  assert histories[0].office_id == office.id
   assert histories[0].change_reason == "Employment as case officer"
 
 

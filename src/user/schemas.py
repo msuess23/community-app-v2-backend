@@ -9,13 +9,20 @@ from src.core.security import ensure_bcrypt_compatible, normalize_email
 from src.user.models import Role
 
 
+def _normalize_name(value: str) -> str:
+  normalized = " ".join(value.split())
+  if len(normalized) < 2:
+    raise ValueError("name must contain at least 2 characters")
+  return normalized
+
+
 class UserCreate(BaseModel):
   model_config = ConfigDict(extra="forbid")
 
   email: EmailStr
   password: str = Field(..., min_length=8, max_length=128)
-  first_name: str = Field(..., min_length=2)
-  last_name: str = Field(..., min_length=2)
+  first_name: str = Field(..., min_length=2, max_length=100)
+  last_name: str = Field(..., min_length=2, max_length=100)
 
   @field_validator("email")
   @classmethod
@@ -26,6 +33,11 @@ class UserCreate(BaseModel):
   @classmethod
   def validate_password_bytes(cls, value: str) -> str:
     return ensure_bcrypt_compatible(value)
+
+  @field_validator("first_name", "last_name")
+  @classmethod
+  def normalize_names(cls, value: str) -> str:
+    return _normalize_name(value)
 
 
 class UserResponse(BaseMetadataResponse):
@@ -40,8 +52,13 @@ class UserResponse(BaseMetadataResponse):
 
 
 class UserUpdate(BaseModel):
-  first_name: Optional[str] = Field(None, min_length=2)
-  last_name: Optional[str] = Field(None, min_length=2)
+  first_name: Optional[str] = Field(None, min_length=2, max_length=100)
+  last_name: Optional[str] = Field(None, min_length=2, max_length=100)
+
+  @field_validator("first_name", "last_name")
+  @classmethod
+  def normalize_names(cls, value: Optional[str]) -> Optional[str]:
+    return _normalize_name(value) if value is not None else None
 
 
 class AdminUserUpdate(UserUpdate):
@@ -52,7 +69,7 @@ class AdminUserUpdate(UserUpdate):
   @field_validator("change_reason")
   @classmethod
   def normalize_change_reason(cls, value: str) -> str:
-    normalized = value.strip()
+    normalized = " ".join(value.split())
     if len(normalized) < 3:
       raise ValueError("change_reason must contain at least 3 characters")
     return normalized
@@ -64,7 +81,7 @@ class UserDeactivateRequest(BaseModel):
   @field_validator("change_reason")
   @classmethod
   def normalize_change_reason(cls, value: str) -> str:
-    normalized = value.strip()
+    normalized = " ".join(value.split())
     if len(normalized) < 3:
       raise ValueError("change_reason must contain at least 3 characters")
     return normalized
@@ -79,7 +96,6 @@ class UserHistoryResponse(BaseModel):
   role: Role
   office_id: Optional[UUID] = None
   is_active: bool
-  deactivated_at: Optional[datetime] = None
   changed_by_user_id: UUID
   change_reason: str
   changed_at: datetime
