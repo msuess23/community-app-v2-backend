@@ -13,14 +13,16 @@ from src.auth.dependencies import get_current_user, get_optional_current_user, r
 from src.core.database import get_db
 from src.core.filters import SortOrder, get_bbox_filter
 from src.core.schemas import PaginatedResponse
-from src.ticket.events import TicketCategory, TicketStatus
+from src.ticket.domain import TicketCategory, TicketStatus
 from src.ticket.models import TicketSortField
 from src.ticket.schemas import (
   TicketCancelRequest,
   TicketCitizenResponseRequest, TicketCreateRequest, TicketResponse, TicketStatusResponse, TicketUpdateRequest,
 )
-from src.ticket.service import TicketService
-from src.ticket.workflow_service import TicketWorkflowService
+from src.ticket.services.mapper import TicketResponseMapper
+from src.ticket.services.ticket_commands import TicketCommandService
+from src.ticket.services.ticket_queries import TicketQueryService
+from src.ticket.services.workflow_commands import TicketWorkflowCommandService
 from src.user.models import Role, User
 
 
@@ -28,23 +30,23 @@ router = APIRouter()
 
 @router.get("", response_model=PaginatedResponse[TicketResponse])
 async def list_public_tickets(
-  office_id: uuid.UUID | None = Query(None, alias="officeId"),
+  office_id: uuid.UUID | None = Query(None),
   category: TicketCategory | None = Query(None),
-  created_from: datetime | None = Query(None, alias="createdFrom"),
-  created_to: datetime | None = Query(None, alias="createdTo"),
+  created_from: datetime | None = Query(None),
+  created_to: datetime | None = Query(None),
   bbox: Optional[Tuple[float, float, float, float]] = Depends(get_bbox_filter),
   ticket_status: TicketStatus | None = Query(None, alias="status"),
   q: str | None = Query(None, max_length=200),
   page: int = Query(1, ge=1),
   size: int = Query(20, ge=1, le=100),
-  sort_by: TicketSortField = Query(TicketSortField.CREATED_AT, alias="sortBy"),
+  sort_by: TicketSortField = Query(TicketSortField.CREATED_AT),
   order: SortOrder = SortOrder.DESC,
   db: AsyncSession = Depends(get_db),
   current_user: User | None = Depends(get_optional_current_user),
 ):
-  """Lists public community tickets using the former Ktor filter names."""
+  """List public community tickets using snake_case query parameters."""
 
-  return await TicketService.list_public_tickets(
+  return await TicketQueryService.list_public_tickets(
     db,
     current_user=current_user,
     page=page,
@@ -68,14 +70,14 @@ async def list_my_tickets(
   q: str | None = Query(None, max_length=200),
   page: int = Query(1, ge=1),
   size: int = Query(20, ge=1, le=100),
-  sort_by: TicketSortField = Query(TicketSortField.CREATED_AT, alias="sortBy"),
+  sort_by: TicketSortField = Query(TicketSortField.CREATED_AT),
   order: SortOrder = SortOrder.DESC,
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(get_current_user),
 ):
   """Lists all public and private tickets created by the current user."""
 
-  return await TicketService.list_my_tickets(
+  return await TicketQueryService.list_my_tickets(
     db,
     current_user=current_user,
     page=page,
@@ -96,7 +98,7 @@ async def get_ticket(
 ):
   """Returns a public ticket or a private ticket visible to the caller."""
 
-  return await TicketService.get_ticket(db, ticket_id, current_user)
+  return await TicketQueryService.get_ticket(db, ticket_id, current_user)
 
 
 @router.get("/{ticket_id}/status", response_model=list[TicketStatusResponse])
@@ -107,7 +109,7 @@ async def get_ticket_status_history(
 ):
   """Returns the reduced citizen-facing status history."""
 
-  return await TicketService.get_status_history(db, ticket_id, current_user)
+  return await TicketQueryService.get_status_history(db, ticket_id, current_user)
 
 
 @router.get(
@@ -122,7 +124,7 @@ async def get_current_ticket_status(
 ):
   """Returns the latest citizen-facing status or HTTP 204 if none exists."""
 
-  current = await TicketService.get_current_status(db, ticket_id, current_user)
+  current = await TicketQueryService.get_current_status(db, ticket_id, current_user)
   if current is None:
     response.status_code = status.HTTP_204_NO_CONTENT
   return current
@@ -137,8 +139,13 @@ async def respond_to_ticket_question(
 ):
   """Lets the ticket creator answer the currently pending authority question."""
 
-  return await TicketWorkflowService.respond_as_citizen(
+  ticket, event = await TicketWorkflowCommandService.respond_as_citizen(
     db, ticket_id, request, current_user
+  )
+  return TicketResponseMapper.to_public_ticket(
+    ticket,
+    current_status_event=event,
+    current_user=current_user,
   )
 
 
@@ -150,7 +157,7 @@ async def create_ticket(
 ):
   """Submits a ticket to the dispatcher inbox without an office selection."""
 
-  return await TicketService.create_ticket(db, request, current_user)
+  return await TicketCommandService.create_ticket(db, request, current_user)
 
 
 @router.put("/{ticket_id}", response_model=TicketResponse)
@@ -162,7 +169,7 @@ async def update_ticket(
 ):
   """Updates a citizen ticket before it has been dispatched."""
 
-  return await TicketService.update_ticket(db, ticket_id, request, current_user)
+  return await TicketCommandService.update_ticket(db, ticket_id, request, current_user)
 
 
 @router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -174,4 +181,4 @@ async def cancel_ticket(
 ):
   """Cancels a ticket while it is still waiting in the central inbox."""
 
-  await TicketService.cancel_ticket(db, ticket_id, request, current_user)
+  await TicketCommandService.cancel_ticket(db, ticket_id, request, current_user)

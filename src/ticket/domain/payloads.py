@@ -153,7 +153,7 @@ class TicketImageRemovedPayload(BaseModel):
 
 
 class TicketCoverImageChangedPayload(BaseModel):
-  """Selects the image represented by the legacy imageUrl response field."""
+  """Select the image represented by the ticket cover URL."""
 
   image_id: UUID
 

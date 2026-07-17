@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from src.address.schemas import AddressResponse
 from src.core.config import settings
-from src.ticket.events import (
+from src.ticket.domain import (
   EscalationDecision,
   TicketCompletionOutcome,
   TicketEventType,
@@ -92,7 +92,7 @@ class TicketResponseMapper:
         and (
           current_user.id in {
             ticket.primary_officer_id,
-            ticket.current_responsible_user_id,
+            ticket.current_assignee_id,
           }
           or (
             current_user.office_id is not None
@@ -148,8 +148,8 @@ class TicketResponseMapper:
       **public_response.model_dump(),
       workflow_state=ticket.workflow_state,
       primary_officer_id=ticket.primary_officer_id,
-      current_responsible_user_id=ticket.current_responsible_user_id,
-      pending_return_to_user_id=ticket.pending_return_to_user_id,
+      current_assignee_id=ticket.current_assignee_id,
+      return_to_user_id=ticket.return_to_user_id,
     )
 
   @staticmethod

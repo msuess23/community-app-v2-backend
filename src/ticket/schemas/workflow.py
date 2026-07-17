@@ -6,23 +6,19 @@ from datetime import datetime
 from typing import Annotated, Any, Literal, TypeAlias
 from uuid import UUID
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
-from src.ticket.events import (
+from src.ticket.domain import (
   EscalationDecision,
   TicketCompletionOutcome,
   TicketEventType,
   TicketWorkflowAction,
 )
-from src.ticket.schemas.base import (
-  TicketApiModel,
-  _normalize_optional_text,
-  _normalize_required_text,
-)
+from src.core.validation import normalize_optional_text, normalize_required_text
 from src.ticket.schemas.ticket import TicketInternalResponse
 
 
-class TicketDispatchRequest(TicketApiModel):
+class TicketDispatchRequest(BaseModel):
   """Dispatcher command that selects the responsible authority."""
 
   office_id: UUID
@@ -31,10 +27,10 @@ class TicketDispatchRequest(TicketApiModel):
   @field_validator("comment")
   @classmethod
   def normalize_comment(cls, value: str | None) -> str | None:
-    return _normalize_optional_text(value)
+    return normalize_optional_text(value)
 
 
-class PrimaryOfficerAssignmentRequest(TicketApiModel):
+class PrimaryOfficerAssignmentRequest(BaseModel):
   """Manager command that selects the permanent case owner."""
 
   primary_officer_id: UUID
@@ -43,10 +39,10 @@ class PrimaryOfficerAssignmentRequest(TicketApiModel):
   @field_validator("comment")
   @classmethod
   def normalize_comment(cls, value: str | None) -> str | None:
-    return _normalize_optional_text(value)
+    return normalize_optional_text(value)
 
 
-class ForwardTicketAction(TicketApiModel):
+class ForwardTicketAction(BaseModel):
   """Transfers current coordination to another staff member."""
 
   action: Literal[TicketWorkflowAction.FORWARD]
@@ -56,10 +52,10 @@ class ForwardTicketAction(TicketApiModel):
   @field_validator("comment")
   @classmethod
   def normalize_comment(cls, value: str | None) -> str | None:
-    return _normalize_optional_text(value)
+    return normalize_optional_text(value)
 
 
-class RequestCosignatureAction(TicketApiModel):
+class RequestCosignatureAction(BaseModel):
   """Temporarily sends the ticket to one selected cosigner."""
 
   action: Literal[TicketWorkflowAction.REQUEST_COSIGNATURE]
@@ -69,10 +65,10 @@ class RequestCosignatureAction(TicketApiModel):
   @field_validator("comment")
   @classmethod
   def normalize_comment(cls, value: str | None) -> str | None:
-    return _normalize_optional_text(value)
+    return normalize_optional_text(value)
 
 
-class CosignTicketAction(TicketApiModel):
+class CosignTicketAction(BaseModel):
   """Records the requested cosignature and returns the case."""
 
   action: Literal[TicketWorkflowAction.COSIGN]
@@ -81,10 +77,10 @@ class CosignTicketAction(TicketApiModel):
   @field_validator("comment")
   @classmethod
   def normalize_comment(cls, value: str | None) -> str | None:
-    return _normalize_optional_text(value)
+    return normalize_optional_text(value)
 
 
-class EscalateTicketAction(TicketApiModel):
+class EscalateTicketAction(BaseModel):
   """Requests a decision from one active manager."""
 
   action: Literal[TicketWorkflowAction.ESCALATE]
@@ -94,10 +90,10 @@ class EscalateTicketAction(TicketApiModel):
   @field_validator("reason")
   @classmethod
   def normalize_reason(cls, value: str) -> str:
-    return _normalize_required_text(value)
+    return normalize_required_text(value)
 
 
-class DecideEscalationAction(TicketApiModel):
+class DecideEscalationAction(BaseModel):
   """Approves or rejects the currently pending escalation."""
 
   action: Literal[TicketWorkflowAction.DECIDE_ESCALATION]
@@ -107,10 +103,10 @@ class DecideEscalationAction(TicketApiModel):
   @field_validator("comment")
   @classmethod
   def normalize_comment(cls, value: str | None) -> str | None:
-    return _normalize_optional_text(value)
+    return normalize_optional_text(value)
 
 
-class RequestCitizenResponseAction(TicketApiModel):
+class RequestCitizenResponseAction(BaseModel):
   """Pauses staff processing until the citizen answers a question."""
 
   action: Literal[TicketWorkflowAction.REQUEST_CITIZEN_RESPONSE]
@@ -119,10 +115,10 @@ class RequestCitizenResponseAction(TicketApiModel):
   @field_validator("question")
   @classmethod
   def normalize_question(cls, value: str) -> str:
-    return _normalize_required_text(value)
+    return normalize_required_text(value)
 
 
-class CompleteTicketAction(TicketApiModel):
+class CompleteTicketAction(BaseModel):
   """Completes a ticket with a resolved or rejected public outcome."""
 
   action: Literal[TicketWorkflowAction.COMPLETE]
@@ -132,7 +128,7 @@ class CompleteTicketAction(TicketApiModel):
   @field_validator("message")
   @classmethod
   def normalize_message(cls, value: str) -> str:
-    return _normalize_required_text(value)
+    return normalize_required_text(value)
 
 
 TicketWorkflowRequest: TypeAlias = Annotated[
@@ -147,7 +143,7 @@ TicketWorkflowRequest: TypeAlias = Annotated[
 ]
 
 
-class TicketEventResponse(TicketApiModel):
+class TicketEventResponse(BaseModel):
   """Internal chronological event record used by the authority client."""
 
   id: UUID
@@ -165,7 +161,7 @@ class TicketInternalDetailResponse(TicketInternalResponse):
   allowed_actions: list[TicketWorkflowAction] = Field(default_factory=list)
 
 
-class TicketCitizenResponseRequest(TicketApiModel):
+class TicketCitizenResponseRequest(BaseModel):
   """Citizen answer to the currently pending authority question."""
 
   message: str = Field(..., min_length=1, max_length=2000)
@@ -173,4 +169,4 @@ class TicketCitizenResponseRequest(TicketApiModel):
   @field_validator("message")
   @classmethod
   def normalize_message(cls, value: str) -> str:
-    return _normalize_required_text(value)
+    return normalize_required_text(value)

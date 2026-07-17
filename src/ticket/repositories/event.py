@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from src.ticket.events import TicketEventType
+from src.ticket.domain import TicketEventType
 from src.ticket.models import TicketEvent
 
 

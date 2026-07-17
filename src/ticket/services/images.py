@@ -15,7 +15,7 @@ from src.core.exceptions import (
   ForbiddenException,
   ResourceNotFoundException,
 )
-from src.ticket.events import (
+from src.ticket.domain import (
   TicketCoverImageChangedPayload,
   TicketEventType,
   TicketImageAddedPayload,
@@ -24,7 +24,8 @@ from src.ticket.events import (
 )
 from src.ticket.storage import LocalTicketMediaStorage
 from src.ticket.models import Ticket, TicketImage
-from src.ticket.repository import TicketRepository
+from src.ticket.repositories.image import TicketImageRepository
+from src.ticket.repositories.ticket import TicketProjectionRepository
 from src.ticket.schemas import TicketImageRemoveRequest, TicketImageResponse
 from src.ticket.services.access_policy import TicketAccessPolicy
 from src.ticket.services.event_store import TicketEventStore
@@ -37,7 +38,7 @@ class TicketImageService:
 
   @staticmethod
   def _image_url(ticket_id: uuid.UUID, image_id: uuid.UUID) -> str:
-    """Builds the stable API URL used by the old imageUrl field."""
+    """Build the stable API URL for one ticket image."""
 
     return f"{settings.BASE_URL}/tickets/{ticket_id}/images/{image_id}/content"
 
@@ -97,7 +98,7 @@ class TicketImageService:
   ) -> list[TicketImageResponse]:
     """Lists current images or, for authorized staff, the complete audit list."""
 
-    ticket = await TicketRepository.get_by_id(db, ticket_id)
+    ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     if ticket is None or not await TicketAccessPolicy.can_view(db, ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
 
@@ -107,7 +108,7 @@ class TicketImageService:
       if not await TicketAccessPolicy.can_view_internal(db, ticket, current_user):
         raise ForbiddenException("The user has no internal access to this ticket")
 
-    images = await TicketRepository.get_images(
+    images = await TicketImageRepository.get_images(
       db,
       ticket_id,
       include_removed=include_removed,
@@ -132,7 +133,7 @@ class TicketImageService:
       ticket_id=ticket.id,
       image_id=image_id,
     )
-    active_images = await TicketRepository.get_images(
+    active_images = await TicketImageRepository.get_images(
       db,
       ticket.id,
       include_removed=False,
@@ -141,7 +142,7 @@ class TicketImageService:
     is_cover = not active_images
 
     try:
-      event = await TicketEventStore._append_event(
+      event = await TicketEventStore.append(
         db,
         ticket,
         actor_user_id=current_user.id,
@@ -169,7 +170,7 @@ class TicketImageService:
         added_event_id=event.id,
         cover_selected_event_id=(event.id if is_cover else None),
       )
-      TicketRepository.add_image(db, image)
+      TicketImageRepository.add_image(db, image)
       await db.flush()
     except Exception:
       # Failures before the request commit must not leave an unreferenced file.
@@ -190,7 +191,7 @@ class TicketImageService:
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     await TicketImageService._require_manage_permission(db, ticket, current_user)
-    images = await TicketRepository.get_images(
+    images = await TicketImageRepository.get_images(
       db,
       ticket.id,
       include_removed=False,
@@ -205,7 +206,7 @@ class TicketImageService:
     if selected.is_cover:
       return TicketImageService._response(selected)
 
-    event = await TicketEventStore._append_event(
+    event = await TicketEventStore.append(
       db,
       ticket,
       actor_user_id=current_user.id,
@@ -231,7 +232,7 @@ class TicketImageService:
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     await TicketImageService._require_manage_permission(db, ticket, current_user)
-    images = await TicketRepository.get_images(
+    images = await TicketImageRepository.get_images(
       db,
       ticket.id,
       include_removed=False,
@@ -245,7 +246,7 @@ class TicketImageService:
       )
 
     removed_at = datetime.now(timezone.utc)
-    removed_event = await TicketEventStore._append_event(
+    removed_event = await TicketEventStore.append(
       db,
       ticket,
       actor_user_id=current_user.id,
@@ -263,7 +264,7 @@ class TicketImageService:
     if remaining and not any(item.is_cover for item in remaining):
       # Selecting a replacement cover is a second explicit aggregate event.
       new_cover = remaining[0]
-      cover_event = await TicketEventStore._append_event(
+      cover_event = await TicketEventStore.append(
         db,
         ticket,
         actor_user_id=current_user.id,
@@ -283,8 +284,8 @@ class TicketImageService:
   ) -> tuple[Path, TicketImage]:
     """Returns image bytes, including removed revisions only for internal staff."""
 
-    ticket = await TicketRepository.get_by_id(db, ticket_id)
-    image = await TicketRepository.get_image(db, ticket_id, image_id)
+    ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
+    image = await TicketImageRepository.get_image(db, ticket_id, image_id)
     if ticket is None or image is None:
       raise ResourceNotFoundException(
         "Ticket image not found",

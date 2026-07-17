@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from src.core.exceptions import ForbiddenException
-from src.ticket.events import (
+from src.ticket.domain import (
   EscalationDecision,
   TicketCategory,
   TicketCompletionOutcome,
@@ -22,7 +22,7 @@ from src.ticket.schemas import (
   DecideEscalationAction,
   RequestCosignatureAction,
 )
-from src.ticket.workflow_command_service import TicketWorkflowCommandService
+from src.ticket.services.workflow_commands import TicketWorkflowCommandService
 from src.user.models import Role, User
 
 
@@ -44,7 +44,7 @@ def _ticket(
   *,
   coordinator_id: UUID,
   workflow_state: TicketWorkflowState = TicketWorkflowState.IN_PROGRESS,
-  pending_return_to_user_id: UUID | None = None,
+  return_to_user_id: UUID | None = None,
   version: int = 3,
 ) -> Ticket:
   now = datetime.now(timezone.utc)
@@ -59,8 +59,8 @@ def _ticket(
     public_status_message="In progress",
     workflow_state=workflow_state,
     primary_officer_id=coordinator_id,
-    current_responsible_user_id=coordinator_id,
-    pending_return_to_user_id=pending_return_to_user_id,
+    current_assignee_id=coordinator_id,
+    return_to_user_id=return_to_user_id,
     version=version,
     created_at=now,
     updated_at=now,
@@ -69,11 +69,11 @@ def _ticket(
 
 def _mock_event_writes(monkeypatch, staged: list[TicketEvent]) -> None:
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.add",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.add",
     lambda _db, _ticket: None,
   )
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.add_event",
+    "src.ticket.repositories.event.TicketEventRepository.add_event",
     lambda _db, event: staged.append(event),
   )
 
@@ -87,7 +87,7 @@ async def test_cosignature_is_sequential_and_returns_to_requester(monkeypatch) -
   staged: list[TicketEvent] = []
 
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_by_id_for_update",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
@@ -101,13 +101,13 @@ async def test_cosignature_is_sequential_and_returns_to_requester(monkeypatch) -
     ticket.id,
     RequestCosignatureAction(
       action=TicketWorkflowAction.REQUEST_COSIGNATURE,
-      targetUserId=cosigner.id,
+      target_user_id=cosigner.id,
       comment="Please review",
     ),
     requester,
   )
   assert ticket.workflow_state == TicketWorkflowState.WAITING_FOR_COSIGNATURE
-  assert ticket.current_responsible_user_id == cosigner.id
+  assert ticket.current_assignee_id == cosigner.id
 
   await TicketWorkflowCommandService.cosign_ticket(
     db,
@@ -119,7 +119,7 @@ async def test_cosignature_is_sequential_and_returns_to_requester(monkeypatch) -
     cosigner,
   )
   assert ticket.workflow_state == TicketWorkflowState.IN_PROGRESS
-  assert ticket.current_responsible_user_id == requester.id
+  assert ticket.current_assignee_id == requester.id
   assert [event.event_type for event in staged] == [
     TicketEventType.COSIGNATURE_REQUESTED,
     TicketEventType.TICKET_COSIGNED,
@@ -135,13 +135,13 @@ async def test_escalation_decision_is_one_command(monkeypatch) -> None:
     uuid4(),
     coordinator_id=manager.id,
     workflow_state=TicketWorkflowState.WAITING_FOR_DECISION,
-    pending_return_to_user_id=requester.id,
+    return_to_user_id=requester.id,
     version=4,
   )
   staged: list[TicketEvent] = []
 
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_by_id_for_update",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
@@ -161,7 +161,7 @@ async def test_escalation_decision_is_one_command(monkeypatch) -> None:
     manager,
   )
 
-  assert ticket.current_responsible_user_id == requester.id
+  assert ticket.current_assignee_id == requester.id
   assert ticket.workflow_state == TicketWorkflowState.IN_PROGRESS
   assert staged[-1].event_type == TicketEventType.ESCALATION_DECIDED
   assert staged[-1].payload["decision"] == "APPROVED"
@@ -173,7 +173,7 @@ async def test_only_manager_can_complete_as_rejected(monkeypatch) -> None:
   officer = _user(Role.OFFICER)
   ticket = _ticket(uuid4(), coordinator_id=officer.id)
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_by_id_for_update",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
 

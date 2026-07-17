@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user, get_optional_current_user
 from src.core.database import get_db
-from src.ticket.comment_service import TicketCommentService
+from src.ticket.services.comments import TicketCommentService
 from src.ticket.schemas import TicketCommentCreateRequest, TicketCommentResponse
 from src.user.models import User
 

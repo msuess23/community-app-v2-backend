@@ -5,8 +5,8 @@ from uuid import UUID, uuid4
 import pytest
 
 from src.core.exceptions import ForbiddenException
-from src.ticket.comment_service import TicketCommentService
-from src.ticket.events import (
+from src.ticket.services.comments import TicketCommentService
+from src.ticket.domain import (
   TicketCategory,
   TicketEventType,
   TicketStatus,
@@ -55,7 +55,7 @@ async def test_citizen_cannot_create_internal_comment(monkeypatch) -> None:
   citizen = _user(Role.CITIZEN)
   ticket = _ticket(citizen.id)
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_by_id_for_update",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
 
@@ -63,7 +63,7 @@ async def test_citizen_cannot_create_internal_comment(monkeypatch) -> None:
     await TicketCommentService.add_comment(
       AsyncMock(),
       ticket.id,
-      TicketCommentCreateRequest(text="Hidden note", isInternal=True),
+      TicketCommentCreateRequest(text="Hidden note", is_internal=True),
       citizen,
     )
 
@@ -76,15 +76,15 @@ async def test_external_comment_is_append_only_and_citizen_visible(monkeypatch) 
   db = AsyncMock()
 
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_by_id_for_update",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.add",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.add",
     lambda _db, _ticket: None,
   )
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.add_event",
+    "src.ticket.repositories.event.TicketEventRepository.add_event",
     lambda _db, event: staged_events.append(event),
   )
 
@@ -126,11 +126,11 @@ async def test_public_comment_list_filters_internal_staff_notes(monkeypatch) -> 
   )
 
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_by_id",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_comment_events",
+    "src.ticket.repositories.event.TicketEventRepository.get_comment_events",
     AsyncMock(return_value=[public_event, internal_event]),
   )
 

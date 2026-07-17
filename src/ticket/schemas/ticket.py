@@ -5,24 +5,22 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.address.schemas import AddressCreate, AddressResponse
-from src.ticket.events import TicketCategory, TicketStatus, TicketVisibility, TicketWorkflowState
-from src.ticket.schemas.base import TicketApiModel, _normalize_optional_text, _normalize_required_text, _to_camel
+from src.core.validation import normalize_optional_text, normalize_required_text
+from src.ticket.domain import (
+  TicketCategory,
+  TicketStatus,
+  TicketVisibility,
+  TicketWorkflowState,
+)
 
-class TicketCreateRequest(TicketApiModel):
-  """Citizen submission contract derived from the previous Ktor DTO.
 
-  officeId is intentionally absent.  Every new ticket enters the central
-  dispatcher inbox and receives its office assignment later in the workflow.
-  """
+class TicketCreateRequest(BaseModel):
+  """Citizen submission that enters the central dispatcher inbox."""
 
-  model_config = ConfigDict(
-    alias_generator=_to_camel,
-    populate_by_name=True,
-    extra="forbid",
-  )
+  model_config = ConfigDict(extra="forbid")
 
   title: str = Field(..., min_length=3, max_length=255)
   description: str | None = Field(None, max_length=5000)
@@ -33,22 +31,22 @@ class TicketCreateRequest(TicketApiModel):
   @field_validator("title")
   @classmethod
   def normalize_title(cls, value: str) -> str:
-    return _normalize_required_text(value)
+    """Normalize required title whitespace."""
+
+    return normalize_required_text(value)
 
   @field_validator("description")
   @classmethod
   def normalize_description(cls, value: str | None) -> str | None:
-    return _normalize_optional_text(value)
+    """Normalize optional description whitespace."""
+
+    return normalize_optional_text(value)
 
 
-class TicketUpdateRequest(TicketApiModel):
-  """Citizen-editable fields while the ticket is still in the NEW state."""
+class TicketUpdateRequest(BaseModel):
+  """Citizen-editable fields while the ticket is still new."""
 
-  model_config = ConfigDict(
-    alias_generator=_to_camel,
-    populate_by_name=True,
-    extra="forbid",
-  )
+  model_config = ConfigDict(extra="forbid")
 
   title: str | None = Field(None, min_length=3, max_length=255)
   description: str | None = Field(None, max_length=5000)
@@ -59,15 +57,19 @@ class TicketUpdateRequest(TicketApiModel):
   @field_validator("title")
   @classmethod
   def normalize_title(cls, value: str | None) -> str | None:
-    return _normalize_required_text(value) if value is not None else None
+    """Normalize an optional title when supplied."""
+
+    return normalize_required_text(value) if value is not None else None
 
   @field_validator("description")
   @classmethod
   def normalize_description(cls, value: str | None) -> str | None:
-    return _normalize_optional_text(value)
+    """Normalize optional description whitespace."""
+
+    return normalize_optional_text(value)
 
 
-class TicketCancelRequest(TicketApiModel):
+class TicketCancelRequest(BaseModel):
   """Optional explanation for cancelling a not-yet-dispatched ticket."""
 
   reason: str | None = Field(None, max_length=500)
@@ -75,11 +77,13 @@ class TicketCancelRequest(TicketApiModel):
   @field_validator("reason")
   @classmethod
   def normalize_reason(cls, value: str | None) -> str | None:
-    return _normalize_optional_text(value)
+    """Normalize an optional cancellation reason."""
+
+    return normalize_optional_text(value)
 
 
-class TicketStatusResponse(TicketApiModel):
-  """Citizen-visible status entry compatible with the former Ktor DTO."""
+class TicketStatusResponse(BaseModel):
+  """Citizen-visible status entry derived from the internal event stream."""
 
   id: UUID
   status: TicketStatus
@@ -88,8 +92,8 @@ class TicketStatusResponse(TicketApiModel):
   created_at: datetime
 
 
-class TicketResponse(TicketApiModel):
-  """Citizen-facing ticket representation preserving the former DTO fields."""
+class TicketResponse(BaseModel):
+  """Citizen-facing ticket representation using snake_case API fields."""
 
   id: UUID
   title: str
@@ -108,9 +112,9 @@ class TicketResponse(TicketApiModel):
 
 
 class TicketInternalResponse(TicketResponse):
-  """Additional workflow projection fields shown only to administrative users."""
+  """Additional workflow fields shown only to authority users."""
 
   workflow_state: TicketWorkflowState
   primary_officer_id: UUID | None = None
-  current_responsible_user_id: UUID | None = None
-  pending_return_to_user_id: UUID | None = None
+  current_assignee_id: UUID | None = None
+  return_to_user_id: UUID | None = None

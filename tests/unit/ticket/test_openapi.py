@@ -20,3 +20,28 @@ def test_ticket_openapi_exposes_comments_and_revisioned_images_without_votes() -
   assert "/api/v1/tickets/{ticket_id}/images" in paths
   assert "/api/v1/tickets/{ticket_id}/images/{image_id}/cover" in paths
   assert "/api/v1/tickets/{ticket_id}/vote" not in paths
+
+
+def test_ticket_openapi_uses_snake_case_contract() -> None:
+  spec = app.openapi()
+  public_parameters = {
+    parameter["name"]
+    for parameter in spec["paths"]["/api/v1/tickets"]["get"]["parameters"]
+  }
+  queue_parameters = {
+    parameter["name"]
+    for parameter in spec["paths"]["/api/v1/tickets/work-queue"]["get"]["parameters"]
+  }
+  ticket_fields = set(
+    spec["components"]["schemas"]["TicketResponse"]["properties"]
+  )
+  cosignature_fields = set(
+    spec["components"]["schemas"]["RequestCosignatureAction"]["properties"]
+  )
+
+  assert {"office_id", "created_from", "created_to", "sort_by"} <= public_parameters
+  assert {"workflow_state", "sort_by"} <= queue_parameters
+  assert {"creator_user_id", "current_status", "image_url"} <= ticket_fields
+  assert "creatorUserId" not in ticket_fields
+  assert "target_user_id" in cosignature_fields
+  assert "targetUserId" not in cosignature_fields

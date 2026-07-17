@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user, get_optional_current_user
 from src.core.database import get_db
-from src.ticket.image_service import TicketImageService
+from src.ticket.services.images import TicketImageService
 from src.ticket.schemas import (
   TicketImageRemoveRequest, TicketImageResponse,
 )
@@ -22,7 +22,7 @@ router = APIRouter()
 @router.get("/{ticket_id}/images", response_model=list[TicketImageResponse])
 async def list_ticket_images(
   ticket_id: uuid.UUID,
-  include_removed: bool = Query(False, alias="includeRemoved"),
+  include_removed: bool = Query(False),
   db: AsyncSession = Depends(get_db),
   current_user: User | None = Depends(get_optional_current_user),
 ):
@@ -62,7 +62,7 @@ async def set_ticket_cover_image(
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(get_current_user),
 ):
-  """Selects the image exposed through the legacy imageUrl field."""
+  """Select the image used as the ticket cover."""
 
   return await TicketImageService.set_cover(
     db,

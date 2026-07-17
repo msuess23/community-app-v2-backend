@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from src.ticket.events import (
+from src.ticket.domain import (
   CosignatureRequestedPayload,
   EscalationDecision,
   EscalationDecisionPayload,
@@ -81,8 +81,8 @@ def test_sequential_cosignature_returns_to_requester() -> None:
     occurred_at=now + timedelta(minutes=3),
   )
   assert state.workflow_state == TicketWorkflowState.WAITING_FOR_COSIGNATURE
-  assert state.current_responsible_user_id == cosigner
-  assert state.pending_return_to_user_id == requester
+  assert state.current_assignee_id == cosigner
+  assert state.return_to_user_id == requester
 
   state = evolve_ticket(
     state,
@@ -91,15 +91,15 @@ def test_sequential_cosignature_returns_to_requester() -> None:
     occurred_at=now + timedelta(minutes=4),
   )
   assert state.workflow_state == TicketWorkflowState.IN_PROGRESS
-  assert state.current_responsible_user_id == requester
-  assert state.pending_return_to_user_id is None
+  assert state.current_assignee_id == requester
+  assert state.return_to_user_id is None
 
 
 def test_escalation_decision_uses_one_event_type() -> None:
   now = datetime.now(timezone.utc)
   state, requester = _active_state(now)
   manager = uuid4()
-  from src.ticket.events import TicketEscalatedPayload
+  from src.ticket.domain import TicketEscalatedPayload
 
   state = evolve_ticket(
     state,
@@ -124,7 +124,7 @@ def test_escalation_decision_uses_one_event_type() -> None:
     occurred_at=now + timedelta(minutes=4),
   )
   assert state.workflow_state == TicketWorkflowState.IN_PROGRESS
-  assert state.current_responsible_user_id == requester
+  assert state.current_assignee_id == requester
 
 
 def test_completion_uses_outcome_payload_and_completed_at() -> None:

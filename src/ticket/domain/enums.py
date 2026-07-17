@@ -4,7 +4,7 @@ import enum
 
 
 class TicketCategory(str, enum.Enum):
-  """Categories retained from the previous Ktor ticket API."""
+  """Supported categories for citizen ticket submissions."""
 
   INFRASTRUCTURE = "INFRASTRUCTURE"
   CLEANING = "CLEANING"

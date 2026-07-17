@@ -9,14 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.exceptions import ForbiddenException, ResourceNotFoundException
 from src.core.filters import SortOrder
 from src.core.schemas import PaginatedResponse
-from src.ticket.events import (
+from src.ticket.domain import (
   TicketCategory,
   TicketStatus,
   TicketWorkflowAction,
   TicketWorkflowState,
 )
 from src.ticket.models import Ticket, TicketSortField
-from src.ticket.repository import TicketRepository
+from src.ticket.repositories.event import TicketEventRepository
+from src.ticket.repositories.ticket import TicketProjectionRepository
 from src.ticket.schemas import (
   TicketEventResponse,
   TicketInternalDetailResponse,
@@ -25,8 +26,10 @@ from src.ticket.schemas import (
 from src.ticket.services.access_policy import TicketAccessPolicy
 from src.ticket.services.mapper import TicketResponseMapper
 from src.ticket.services.timeline import latest_status_events
-from src.ticket.services.workflow.rules import STAFF_ROLES
 from src.user.models import Role, User
+
+
+STAFF_ROLES = {Role.OFFICER, Role.MANAGER}
 
 
 class TicketWorkflowQueryService:
@@ -53,11 +56,11 @@ class TicketWorkflowQueryService:
     ):
       actions.append(TicketWorkflowAction.ASSIGN_PRIMARY_OFFICER)
 
-    is_coordinator = (
+    is_assignee = (
       current_user.role in STAFF_ROLES
-      and ticket.current_responsible_user_id == current_user.id
+      and ticket.current_assignee_id == current_user.id
     )
-    if is_coordinator and ticket.workflow_state == TicketWorkflowState.IN_PROGRESS:
+    if is_assignee and ticket.workflow_state == TicketWorkflowState.IN_PROGRESS:
       actions.extend(
         [
           TicketWorkflowAction.FORWARD,
@@ -69,31 +72,31 @@ class TicketWorkflowQueryService:
       )
 
     if (
-      is_coordinator
+      is_assignee
       and ticket.workflow_state == TicketWorkflowState.WAITING_FOR_COSIGNATURE
-      and ticket.pending_return_to_user_id is not None
+      and ticket.return_to_user_id is not None
     ):
       actions.append(TicketWorkflowAction.COSIGN)
 
     if (
       current_user.role == Role.MANAGER
-      and ticket.current_responsible_user_id == current_user.id
+      and ticket.current_assignee_id == current_user.id
       and ticket.workflow_state == TicketWorkflowState.WAITING_FOR_DECISION
-      and ticket.pending_return_to_user_id is not None
+      and ticket.return_to_user_id is not None
     ):
       actions.append(TicketWorkflowAction.DECIDE_ESCALATION)
 
     return actions
 
   @staticmethod
-  async def _internal_detail_response(
+  async def internal_detail_response(
     db: AsyncSession,
     ticket: Ticket,
     current_user: User,
   ) -> TicketInternalDetailResponse:
     """Build one internal detail including server-computed actions."""
 
-    latest = latest_status_events(await TicketRepository.get_events(db, ticket.id))
+    latest = latest_status_events(await TicketEventRepository.get_events(db, ticket.id))
     internal = TicketResponseMapper.to_internal_ticket(
       ticket,
       current_status_event=latest.get(ticket.id),
@@ -123,7 +126,7 @@ class TicketWorkflowQueryService:
     if current_user.role not in {Role.DISPATCHER, Role.OFFICER, Role.MANAGER}:
       raise ForbiddenException("This account has no ticket work queue")
 
-    tickets, total = await TicketRepository.get_staff_page(
+    tickets, total = await TicketProjectionRepository.get_staff_page(
       db,
       current_user=current_user,
       page=page,
@@ -136,7 +139,7 @@ class TicketWorkflowQueryService:
       order=order,
     )
     latest = latest_status_events(
-      await TicketRepository.get_events_for_tickets(db, [ticket.id for ticket in tickets])
+      await TicketEventRepository.get_events_for_tickets(db, [ticket.id for ticket in tickets])
     )
     data = [
       TicketResponseMapper.to_internal_ticket(
@@ -156,12 +159,12 @@ class TicketWorkflowQueryService:
   ) -> TicketInternalDetailResponse:
     """Return the workflow projection and available actions."""
 
-    ticket = await TicketRepository.get_by_id(db, ticket_id)
+    ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     if ticket is None or not await TicketAccessPolicy.can_view_internal(
       db, ticket, current_user
     ):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
-    return await TicketWorkflowQueryService._internal_detail_response(
+    return await TicketWorkflowQueryService.internal_detail_response(
       db, ticket, current_user
     )
 
@@ -173,12 +176,12 @@ class TicketWorkflowQueryService:
   ) -> list[TicketEventResponse]:
     """Return the complete chronological event stream to authorized staff."""
 
-    ticket = await TicketRepository.get_by_id(db, ticket_id)
+    ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     if ticket is None or not await TicketAccessPolicy.can_view_internal(
       db, ticket, current_user
     ):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
     return [
       TicketResponseMapper.to_event(event)
-      for event in await TicketRepository.get_events(db, ticket.id)
+      for event in await TicketEventRepository.get_events(db, ticket.id)
     ]

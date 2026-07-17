@@ -6,10 +6,12 @@ import pytest
 
 from src.core.database import AsyncSessionLocal, Base, engine
 from src.core.security import get_password_hash
-from src.ticket.events import TicketCategory
-from src.ticket.repository import TicketRepository
+from src.ticket.domain import TicketCategory
+from src.ticket.repositories.event import TicketEventRepository
+from src.ticket.repositories.ticket import TicketProjectionRepository
 from src.ticket.schemas import TicketCreateRequest, TicketUpdateRequest
-from src.ticket.service import TicketService
+from src.ticket.services.event_store import TicketEventStore
+from src.ticket.services.ticket_commands import TicketCommandService
 from src.user.models import Role, User
 
 # Import every model before metadata.create_all is called.
@@ -27,7 +29,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.mark.asyncio
 async def test_concurrent_ticket_commands_keep_event_sequence_and_projection_consistent():
-  """Verifies row locking and deterministic replay against real PostgreSQL."""
+  """Verify row locking and deterministic replay against real PostgreSQL."""
 
   from src.core.config import settings
 
@@ -52,7 +54,7 @@ async def test_concurrent_ticket_commands_keep_event_sequence_and_projection_con
     async with AsyncSessionLocal() as db:
       db.add(citizen)
       await db.flush()
-      created = await TicketService.create_ticket(
+      created = await TicketCommandService.create_ticket(
         db,
         TicketCreateRequest(
           title="Concurrent update test",
@@ -65,7 +67,7 @@ async def test_concurrent_ticket_commands_keep_event_sequence_and_projection_con
 
     async def update_description(description: str) -> None:
       async with AsyncSessionLocal() as session:
-        await TicketService.update_ticket(
+        await TicketCommandService.update_ticket(
           session,
           ticket_id,
           TicketUpdateRequest(description=description),
@@ -79,12 +81,13 @@ async def test_concurrent_ticket_commands_keep_event_sequence_and_projection_con
     )
 
     async with AsyncSessionLocal() as db:
-      ticket = await TicketRepository.get_by_id(db, ticket_id)
-      events = await TicketRepository.get_events(db, ticket_id)
+      ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
+      events = await TicketEventRepository.get_events(db, ticket_id)
       assert ticket is not None
       assert ticket.version == 3
       assert [event.sequence_number for event in events] == [1, 2, 3]
-      assert await TicketService.projection_matches_event_stream(db, ticket_id)
+      rebuilt = await TicketEventStore.rebuild(db, ticket_id)
+      assert rebuilt == TicketEventStore.state_from_ticket(ticket)
   finally:
     async with engine.begin() as connection:
       await connection.run_sync(Base.metadata.drop_all)

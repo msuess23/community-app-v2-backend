@@ -9,11 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.address.service import AddressService
 from src.core.exceptions import ConflictException, ForbiddenException, WorkflowValidationException
-from src.ticket.events import (
+from src.ticket.domain import (
   TicketCancelledPayload, TicketDetailsUpdatedPayload, TicketEventType, TicketSubmittedPayload, TicketWorkflowState, evolve_ticket,
 )
 from src.ticket.models import Ticket
-from src.ticket.repository import TicketRepository
+from src.ticket.repositories.event import TicketEventRepository
+from src.ticket.repositories.ticket import TicketProjectionRepository
 from src.ticket.schemas import TicketCancelRequest, TicketCreateRequest, TicketResponse, TicketUpdateRequest
 from src.user.models import Role, User
 
@@ -44,7 +45,7 @@ class TicketCommandService:
       category=request.category,
       creator_user_id=current_user.id,
       address=(
-        TicketEventStore._address_snapshot(request.address)
+        TicketEventStore.address_snapshot(request.address)
         if request.address is not None
         else None
       ),
@@ -58,11 +59,11 @@ class TicketCommandService:
     )
 
     ticket = Ticket(id=uuid.uuid4(), creator_user_id=current_user.id)
-    TicketEventStore._sync_projection(ticket, state)
+    TicketEventStore.sync_projection(ticket, state)
     if request.address is not None:
       ticket.address = AddressService.create_address_entity(request.address)
 
-    event = TicketEventStore._build_event(
+    event = TicketEventStore.build_event(
       ticket_id=ticket.id,
       actor_user_id=current_user.id,
       event_type=TicketEventType.TICKET_SUBMITTED,
@@ -70,8 +71,8 @@ class TicketCommandService:
       state=state,
       occurred_at=occurred_at,
     )
-    TicketRepository.add(db, ticket)
-    TicketRepository.add_event(db, event)
+    TicketProjectionRepository.add(db, ticket)
+    TicketEventRepository.add_event(db, event)
     await db.flush()
     return TicketResponseMapper.to_public_ticket(
       ticket,
@@ -98,7 +99,7 @@ class TicketCommandService:
 
     changes = request.model_dump(exclude_unset=True)
     if not changes:
-      latest = latest_status_events(await TicketRepository.get_events(db, ticket.id))
+      latest = latest_status_events(await TicketEventRepository.get_events(db, ticket.id))
       return TicketResponseMapper.to_public_ticket(
         ticket,
         current_status_event=latest.get(ticket.id),
@@ -120,19 +121,19 @@ class TicketCommandService:
     payload_values = dict(changes)
     if "address" in request.model_fields_set:
       payload_values["address"] = (
-        TicketEventStore._address_snapshot(request.address)
+        TicketEventStore.address_snapshot(request.address)
         if request.address is not None
         else None
       )
     payload = TicketDetailsUpdatedPayload.model_validate(payload_values)
-    await TicketEventStore._append_event(
+    await TicketEventStore.append(
       db,
       ticket,
       actor_user_id=current_user.id,
       event_type=TicketEventType.TICKET_DETAILS_UPDATED,
       payload=payload,
     )
-    latest = latest_status_events(await TicketRepository.get_events(db, ticket.id))
+    latest = latest_status_events(await TicketEventRepository.get_events(db, ticket.id))
     return TicketResponseMapper.to_public_ticket(
       ticket,
       current_status_event=latest.get(ticket.id),
@@ -157,7 +158,7 @@ class TicketCommandService:
         error_code="TICKET_ALREADY_IN_PROCESS",
       )
 
-    await TicketEventStore._append_event(
+    await TicketEventStore.append(
       db,
       ticket,
       actor_user_id=current_user.id,

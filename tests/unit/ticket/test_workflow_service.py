@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from src.ticket.events import (
+from src.ticket.domain import (
   TicketCategory,
   TicketEventType,
   TicketStatus,
@@ -15,8 +15,8 @@ from src.ticket.events import (
 )
 from src.ticket.models import Ticket, TicketEvent
 from src.ticket.schemas import PrimaryOfficerAssignmentRequest, TicketDispatchRequest
-from src.ticket.services.workflow.queries import TicketWorkflowQueryService
-from src.ticket.workflow_service import TicketWorkflowService
+from src.ticket.services.workflow_commands import TicketWorkflowCommandService
+from src.ticket.services.workflow_queries import TicketWorkflowQueryService
 from src.user.models import Role, User
 
 
@@ -39,8 +39,8 @@ def _ticket(
   workflow_state: TicketWorkflowState,
   office_id: UUID | None = None,
   primary_officer_id: UUID | None = None,
-  current_responsible_user_id: UUID | None = None,
-  pending_return_to_user_id: UUID | None = None,
+  current_assignee_id: UUID | None = None,
+  return_to_user_id: UUID | None = None,
   version: int = 1,
 ) -> Ticket:
   now = datetime.now(timezone.utc)
@@ -59,8 +59,8 @@ def _ticket(
     public_status_message="Ticket submitted",
     workflow_state=workflow_state,
     primary_officer_id=primary_officer_id,
-    current_responsible_user_id=current_responsible_user_id,
-    pending_return_to_user_id=pending_return_to_user_id,
+    current_assignee_id=current_assignee_id,
+    return_to_user_id=return_to_user_id,
     version=version,
     created_at=now,
     updated_at=now,
@@ -69,11 +69,11 @@ def _ticket(
 
 def _mock_writes(monkeypatch, events: list[TicketEvent]) -> None:
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.add",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.add",
     lambda _db, _ticket: None,
   )
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.add_event",
+    "src.ticket.repositories.event.TicketEventRepository.add_event",
     lambda _db, event: events.append(event),
   )
 
@@ -85,10 +85,9 @@ async def test_dispatch_moves_ticket_to_active_office(monkeypatch) -> None:
   office_id = uuid4()
   ticket = _ticket(uuid4(), workflow_state=TicketWorkflowState.NEW)
   staged: list[TicketEvent] = []
-  sentinel = object()
 
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_by_id_for_update",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
@@ -96,19 +95,14 @@ async def test_dispatch_moves_ticket_to_active_office(monkeypatch) -> None:
     AsyncMock(return_value=SimpleNamespace(id=office_id, is_active=True)),
   )
   _mock_writes(monkeypatch, staged)
-  monkeypatch.setattr(
-    TicketWorkflowQueryService,
-    "_internal_detail_response",
-    AsyncMock(return_value=sentinel),
-  )
 
-  response = await TicketWorkflowService.dispatch_ticket(
+  response = await TicketWorkflowCommandService.dispatch_ticket(
     db,
     ticket.id,
-    TicketDispatchRequest(officeId=office_id),
+    TicketDispatchRequest(office_id=office_id),
     dispatcher,
   )
-  assert response is sentinel
+  assert response is ticket
   assert ticket.office_id == office_id
   assert staged[-1].event_type == TicketEventType.TICKET_DISPATCHED
 
@@ -125,10 +119,9 @@ async def test_manager_assigns_permanent_officer(monkeypatch) -> None:
     office_id=office_id,
     version=2,
   )
-  sentinel = object()
 
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_by_id_for_update",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
@@ -136,20 +129,16 @@ async def test_manager_assigns_permanent_officer(monkeypatch) -> None:
     AsyncMock(return_value=officer),
   )
   _mock_writes(monkeypatch, [])
-  monkeypatch.setattr(
-    TicketWorkflowQueryService,
-    "_internal_detail_response",
-    AsyncMock(return_value=sentinel),
-  )
 
-  await TicketWorkflowService.assign_primary_officer(
+  response = await TicketWorkflowCommandService.assign_primary_officer(
     db,
     ticket.id,
-    PrimaryOfficerAssignmentRequest(primaryOfficerId=officer.id),
+    PrimaryOfficerAssignmentRequest(primary_officer_id=officer.id),
     manager,
   )
+  assert response is ticket
   assert ticket.primary_officer_id == officer.id
-  assert ticket.current_responsible_user_id == officer.id
+  assert ticket.current_assignee_id == officer.id
 
 
 def test_allowed_actions_expose_sequential_ad_hoc_steps() -> None:
@@ -158,7 +147,7 @@ def test_allowed_actions_expose_sequential_ad_hoc_steps() -> None:
     uuid4(),
     workflow_state=TicketWorkflowState.IN_PROGRESS,
     primary_officer_id=officer.id,
-    current_responsible_user_id=officer.id,
+    current_assignee_id=officer.id,
   )
   assert TicketWorkflowQueryService._allowed_actions(ticket, officer) == [
     TicketWorkflowAction.FORWARD,

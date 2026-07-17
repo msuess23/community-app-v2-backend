@@ -11,9 +11,10 @@ from src.core.exceptions import (
   ResourceNotFoundException,
   WorkflowValidationException,
 )
-from src.ticket.events import TicketCommentedPayload, TicketEventType, TicketWorkflowState
+from src.ticket.domain import TicketCommentedPayload, TicketEventType, TicketWorkflowState
 from src.ticket.models import TicketEvent
-from src.ticket.repository import TicketRepository
+from src.ticket.repositories.event import TicketEventRepository
+from src.ticket.repositories.ticket import TicketProjectionRepository
 from src.ticket.schemas import TicketCommentCreateRequest, TicketCommentResponse
 from src.ticket.services.access_policy import TicketAccessPolicy
 from src.ticket.services.event_store import TicketEventStore
@@ -69,7 +70,7 @@ class TicketCommentService:
     else:
       raise ForbiddenException("This account cannot comment on tickets")
 
-    event = await TicketEventStore._append_event(
+    event = await TicketEventStore.append(
       db,
       ticket,
       actor_user_id=current_user.id,
@@ -89,7 +90,7 @@ class TicketCommentService:
   ) -> list[TicketCommentResponse]:
     """Returns all comments visible to the requesting public or staff client."""
 
-    ticket = await TicketRepository.get_by_id(db, ticket_id)
+    ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     if ticket is None:
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
 
@@ -112,7 +113,7 @@ class TicketCommentService:
     elif not await TicketAccessPolicy.can_view(db, ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
 
-    events = await TicketRepository.get_comment_events(db, ticket.id)
+    events = await TicketEventRepository.get_comment_events(db, ticket.id)
     responses = [TicketCommentService._response(event) for event in events]
     if include_internal:
       return responses

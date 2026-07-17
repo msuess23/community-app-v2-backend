@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.ticket.events import TicketVisibility
+from src.ticket.domain import TicketVisibility
 from src.ticket.models import Ticket
 from src.user.models import Role, User
 
@@ -37,8 +37,8 @@ class TicketAccessPolicy:
         current_user.id
         in {
           ticket.primary_officer_id,
-          ticket.current_responsible_user_id,
-          ticket.pending_return_to_user_id,
+          ticket.current_assignee_id,
+          ticket.return_to_user_id,
         }
         or (
           current_user.office_id is not None
@@ -64,8 +64,8 @@ class TicketAccessPolicy:
       current_user.id
       in {
         ticket.primary_officer_id,
-        ticket.current_responsible_user_id,
-        ticket.pending_return_to_user_id,
+        ticket.current_assignee_id,
+        ticket.return_to_user_id,
       }
       or (
         current_user.office_id is not None

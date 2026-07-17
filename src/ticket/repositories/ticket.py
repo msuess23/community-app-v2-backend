@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from src.address.models import Address
 from src.core.filters import SortOrder, apply_bbox_filter, apply_search_filter
-from src.ticket.events import (
+from src.ticket.domain import (
   TicketCategory, TicketStatus, TicketVisibility,
   TicketWorkflowState,
 )
@@ -84,7 +84,7 @@ class TicketProjectionRepository:
     sort_by: TicketSortField = TicketSortField.CREATED_AT,
     order: SortOrder = SortOrder.DESC,
   ) -> tuple[list[Ticket], int]:
-    """Returns public community tickets using the former Ktor filter meanings."""
+    """Return public community tickets using the documented filters."""
 
     query = (
       select(Ticket)
@@ -201,7 +201,7 @@ class TicketProjectionRepository:
         or_(
           Ticket.office_id == current_user.office_id,
           Ticket.primary_officer_id == current_user.id,
-          Ticket.current_responsible_user_id == current_user.id,
+          Ticket.current_assignee_id == current_user.id,
         ),
       )
     elif current_user.role == Role.OFFICER:
@@ -209,7 +209,7 @@ class TicketProjectionRepository:
         Ticket.workflow_state != TicketWorkflowState.COMPLETED,
         or_(
           Ticket.primary_officer_id == current_user.id,
-          Ticket.current_responsible_user_id == current_user.id,
+          Ticket.current_assignee_id == current_user.id,
         ),
       )
     else:

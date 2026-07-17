@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from src.ticket.events import (
+from src.ticket.domain import (
   TicketCategory,
   TicketEventType,
   TicketStatus,
@@ -13,7 +13,8 @@ from src.ticket.events import (
 )
 from src.ticket.models import Ticket, TicketEvent
 from src.ticket.schemas import TicketCreateRequest
-from src.ticket.service import TicketService
+from src.ticket.services.mapper import TicketResponseMapper
+from src.ticket.services.ticket_commands import TicketCommandService
 from src.user.models import Role, User
 
 
@@ -23,11 +24,11 @@ async def test_create_ticket_stages_projection_and_initial_event(monkeypatch) ->
   db.flush = AsyncMock()
   staged: list[object] = []
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.add",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.add",
     lambda _db, entity: staged.append(entity),
   )
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.add_event",
+    "src.ticket.repositories.event.TicketEventRepository.add_event",
     lambda _db, entity: staged.append(entity),
   )
   citizen = User(
@@ -40,7 +41,7 @@ async def test_create_ticket_stages_projection_and_initial_event(monkeypatch) ->
     is_active=True,
   )
 
-  response = await TicketService.create_ticket(
+  response = await TicketCommandService.create_ticket(
     db,
     TicketCreateRequest(
       title="Pothole in Main Street",
@@ -54,7 +55,7 @@ async def test_create_ticket_stages_projection_and_initial_event(monkeypatch) ->
   assert ticket.office_id is None
   assert ticket.workflow_state == TicketWorkflowState.NEW
   assert ticket.primary_officer_id is None
-  assert ticket.current_responsible_user_id is None
+  assert ticket.current_assignee_id is None
   assert event.event_type == TicketEventType.TICKET_SUBMITTED
   assert event.sequence_number == 1
   assert ticket.public_status == TicketStatus.OPEN
@@ -87,7 +88,7 @@ def test_ticket_response_locks_citizen_edits_after_processing_starts() -> None:
     images=[],
   )
 
-  response = TicketService._ticket_response(
+  response = TicketResponseMapper.to_public_ticket(
     ticket,
     current_status_event=None,
     current_user=citizen,

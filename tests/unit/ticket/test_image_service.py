@@ -9,9 +9,9 @@ from starlette.datastructures import Headers
 
 from src.core.config import settings
 from src.core.exceptions import ConflictException
-from src.ticket.events import TicketCategory, TicketWorkflowState
-from src.ticket.image_service import TicketImageService
-from src.ticket.media_storage import LocalTicketMediaStorage
+from src.ticket.domain import TicketCategory, TicketWorkflowState
+from src.ticket.services.images import TicketImageService
+from src.ticket.storage import LocalTicketMediaStorage
 from src.ticket.models import Ticket
 from src.user.models import Role, User
 
@@ -79,8 +79,8 @@ async def test_citizen_cannot_change_images_after_dispatch() -> None:
 async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) -> None:
   from datetime import datetime, timezone
 
-  from src.ticket.events import TicketEventType
-  from src.ticket.media_storage import StoredTicketImage
+  from src.ticket.domain import TicketEventType
+  from src.ticket.storage import StoredTicketImage
   from src.ticket.models import TicketEvent, TicketImage
 
   citizen = _citizen()
@@ -101,11 +101,11 @@ async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) 
 
   monkeypatch.setattr(settings, "TICKET_MEDIA_ROOT", str(tmp_path))
   monkeypatch.setattr(
-    "src.ticket.services.images.TicketRepository.get_by_id_for_update",
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
-    "src.ticket.services.images.TicketRepository.get_images",
+    "src.ticket.repositories.image.TicketImageRepository.get_images",
     AsyncMock(return_value=[]),
   )
   monkeypatch.setattr(
@@ -121,11 +121,11 @@ async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) 
   )
   append_event = AsyncMock(return_value=event)
   monkeypatch.setattr(
-    "src.ticket.services.images.TicketEventStore._append_event",
+    "src.ticket.services.images.TicketEventStore.append",
     append_event,
   )
   monkeypatch.setattr(
-    "src.ticket.services.images.TicketRepository.add_image",
+    "src.ticket.repositories.image.TicketImageRepository.add_image",
     lambda _db, image: staged.append(image),
   )
 

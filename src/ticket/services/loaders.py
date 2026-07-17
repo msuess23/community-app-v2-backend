@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ResourceNotFoundException
 from src.ticket.models import Ticket
-from src.ticket.repository import TicketRepository
+from src.ticket.repositories.ticket import TicketProjectionRepository
 
 
 async def require_ticket(
@@ -20,9 +20,9 @@ async def require_ticket(
   """Load one ticket or raise the canonical not-found error."""
 
   ticket = (
-    await TicketRepository.get_by_id_for_update(db, ticket_id)
+    await TicketProjectionRepository.get_by_id_for_update(db, ticket_id)
     if for_update
-    else await TicketRepository.get_by_id(db, ticket_id)
+    else await TicketProjectionRepository.get_by_id(db, ticket_id)
   )
   if ticket is None:
     raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")

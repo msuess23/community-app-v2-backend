@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from src.core.database import Base
-from src.ticket.events import (
+from src.ticket.domain import (
   TicketCategory, TicketEventType, TicketStatus, TicketVisibility,
   TicketWorkflowState,
 )
@@ -79,20 +79,20 @@ class Ticket(Base):
   )
 
   # The primary officer remains the permanent case owner.  The current
-  # responsible user may temporarily change during escalation or citizen input.
+  # assignee may temporarily change during escalation or citizen input.
   primary_officer_id = Column(
     UUID(as_uuid=True),
     ForeignKey("users.id"),
     nullable=True,
     index=True,
   )
-  current_responsible_user_id = Column(
+  current_assignee_id = Column(
     UUID(as_uuid=True),
     ForeignKey("users.id"),
     nullable=True,
     index=True,
   )
-  pending_return_to_user_id = Column(
+  return_to_user_id = Column(
     UUID(as_uuid=True),
     ForeignKey("users.id"),
     nullable=True,
@@ -124,13 +124,13 @@ class Ticket(Base):
     lazy="selectin",
   )
   primary_officer = relationship("User", foreign_keys=[primary_officer_id])
-  current_responsible_user = relationship(
+  current_assignee = relationship(
     "User",
-    foreign_keys=[current_responsible_user_id],
+    foreign_keys=[current_assignee_id],
   )
-  pending_return_to_user = relationship(
+  return_to_user = relationship(
     "User",
-    foreign_keys=[pending_return_to_user_id],
+    foreign_keys=[return_to_user_id],
   )
   events = relationship(
     "TicketEvent",

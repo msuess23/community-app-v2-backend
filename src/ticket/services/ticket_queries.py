@@ -11,9 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.exceptions import ResourceNotFoundException
 from src.core.filters import SortOrder
 from src.core.schemas import PaginatedResponse
-from src.ticket.events import TicketCategory, TicketStatus
+from src.ticket.domain import TicketCategory, TicketStatus
 from src.ticket.models import TicketSortField
-from src.ticket.repository import TicketRepository
+from src.ticket.repositories.event import TicketEventRepository
+from src.ticket.repositories.ticket import TicketProjectionRepository
 from src.ticket.schemas import TicketResponse, TicketStatusResponse
 from src.ticket.services.access_policy import TicketAccessPolicy
 from src.ticket.services.mapper import TicketResponseMapper
@@ -29,7 +30,7 @@ class TicketQueryService:
     db: AsyncSession,
     ticket_ids: list[uuid.UUID],
   ):
-    events = await TicketRepository.get_events_for_tickets(db, ticket_ids)
+    events = await TicketEventRepository.get_events_for_tickets(db, ticket_ids)
     return latest_status_events(events)
 
   @staticmethod
@@ -51,7 +52,7 @@ class TicketQueryService:
   ) -> PaginatedResponse[TicketResponse]:
     """List public community tickets with the established filters."""
 
-    tickets, total = await TicketRepository.get_public_page(
+    tickets, total = await TicketProjectionRepository.get_public_page(
       db,
       page=page,
       size=size,
@@ -93,7 +94,7 @@ class TicketQueryService:
   ) -> PaginatedResponse[TicketResponse]:
     """List all public and private tickets owned by the current citizen."""
 
-    tickets, total = await TicketRepository.get_creator_page(
+    tickets, total = await TicketProjectionRepository.get_creator_page(
       db,
       creator_user_id=current_user.id,
       page=page,
@@ -125,7 +126,7 @@ class TicketQueryService:
   ) -> TicketResponse:
     """Return a public ticket or a private ticket visible to the caller."""
 
-    ticket = await TicketRepository.get_by_id(db, ticket_id)
+    ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     if ticket is None or not await TicketAccessPolicy.can_view(db, ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
     latest = await TicketQueryService._latest_status_events(db, [ticket.id])
@@ -143,10 +144,10 @@ class TicketQueryService:
   ) -> list[TicketStatusResponse]:
     """Return the reduced citizen-facing status history."""
 
-    ticket = await TicketRepository.get_by_id(db, ticket_id)
+    ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     if ticket is None or not await TicketAccessPolicy.can_view(db, ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
-    return status_history(await TicketRepository.get_events(db, ticket_id))
+    return status_history(await TicketEventRepository.get_events(db, ticket_id))
 
   @staticmethod
   async def get_current_status(
@@ -156,7 +157,7 @@ class TicketQueryService:
   ) -> TicketStatusResponse | None:
     """Return the latest citizen-facing processing status."""
 
-    ticket = await TicketRepository.get_by_id(db, ticket_id)
+    ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     if ticket is None or not await TicketAccessPolicy.can_view(db, ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
     latest = await TicketQueryService._latest_status_events(db, [ticket.id])

@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from src.ticket.events import (
+import pytest
+from pydantic import ValidationError
+
+from src.ticket.domain import (
   EscalationDecision,
   TicketCategory,
   TicketCompletionOutcome,
@@ -18,7 +21,7 @@ from src.ticket.schemas import (
 )
 
 
-def test_ticket_response_keeps_existing_camel_case_contract_for_now() -> None:
+def test_ticket_response_uses_plain_snake_case_fields() -> None:
   now = datetime.now(timezone.utc)
   response = TicketResponse(
     id=uuid4(),
@@ -36,20 +39,26 @@ def test_ticket_response_keeps_existing_camel_case_contract_for_now() -> None:
     version=1,
   )
 
-  data = response.model_dump(by_alias=True)
-  assert "creatorUserId" in data
-  assert "currentStatus" in data
-  assert "votesCount" not in data
+  data = response.model_dump()
+  assert "creator_user_id" in data
+  assert "current_status" in data
+  assert "creatorUserId" not in data
 
 
-def test_cosignature_action_uses_one_target_user() -> None:
+def test_cosignature_action_rejects_camel_case_input() -> None:
   target = uuid4()
   action = RequestCosignatureAction(
     action=TicketWorkflowAction.REQUEST_COSIGNATURE,
-    targetUserId=target,
+    target_user_id=target,
     comment="Please review",
   )
   assert action.target_user_id == target
+
+  with pytest.raises(ValidationError):
+    RequestCosignatureAction(
+      action=TicketWorkflowAction.REQUEST_COSIGNATURE,
+      targetUserId=target,
+    )
 
 
 def test_combined_decision_and_completion_actions_validate() -> None:

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from src.ticket.domain.image_projection import rebuild_ticket_images
-from src.ticket.events import TicketEventType
+from src.ticket.domain import TicketEventType
 
 
 def test_image_projection_rebuilds_cover_and_removed_revisions() -> None:

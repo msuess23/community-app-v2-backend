@@ -50,8 +50,8 @@ class TicketAggregateState(BaseModel):
   public_status_message: str | None = None
   workflow_state: TicketWorkflowState
   primary_officer_id: UUID | None = None
-  current_responsible_user_id: UUID | None = None
-  pending_return_to_user_id: UUID | None = None
+  current_assignee_id: UUID | None = None
+  return_to_user_id: UUID | None = None
   version: int = 0
   created_at: datetime
   updated_at: datetime
@@ -107,8 +107,8 @@ def evolve_ticket(
     next_state.public_status = TicketStatus.CANCELLED
     next_state.public_status_message = "Ticket cancelled"
     next_state.workflow_state = TicketWorkflowState.COMPLETED
-    next_state.current_responsible_user_id = None
-    next_state.pending_return_to_user_id = None
+    next_state.current_assignee_id = None
+    next_state.return_to_user_id = None
     next_state.cancelled_at = occurred_at
   elif event_type == TicketEventType.TICKET_DISPATCHED:
     dispatched = validated
@@ -121,52 +121,52 @@ def evolve_ticket(
     assigned = validated
     assert isinstance(assigned, PrimaryOfficerAssignedPayload)
     next_state.primary_officer_id = assigned.primary_officer_id
-    next_state.current_responsible_user_id = assigned.primary_officer_id
+    next_state.current_assignee_id = assigned.primary_officer_id
     next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
   elif event_type == TicketEventType.TICKET_FORWARDED:
     forwarded = validated
     assert isinstance(forwarded, TicketForwardedPayload)
-    next_state.current_responsible_user_id = forwarded.target_user_id
-    next_state.pending_return_to_user_id = None
+    next_state.current_assignee_id = forwarded.target_user_id
+    next_state.return_to_user_id = None
     next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
   elif event_type == TicketEventType.COSIGNATURE_REQUESTED:
     request = validated
     assert isinstance(request, CosignatureRequestedPayload)
     next_state.workflow_state = TicketWorkflowState.WAITING_FOR_COSIGNATURE
-    next_state.current_responsible_user_id = request.target_user_id
-    next_state.pending_return_to_user_id = request.return_to_user_id
+    next_state.current_assignee_id = request.target_user_id
+    next_state.return_to_user_id = request.return_to_user_id
   elif event_type == TicketEventType.TICKET_COSIGNED:
     cosigned = validated
     assert isinstance(cosigned, TicketCosignedPayload)
     next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
-    next_state.current_responsible_user_id = cosigned.return_to_user_id
-    next_state.pending_return_to_user_id = None
+    next_state.current_assignee_id = cosigned.return_to_user_id
+    next_state.return_to_user_id = None
   elif event_type == TicketEventType.CITIZEN_RESPONSE_REQUESTED:
     request = validated
     assert isinstance(request, CitizenResponseRequestedPayload)
     next_state.workflow_state = TicketWorkflowState.WAITING_FOR_CITIZEN
-    next_state.current_responsible_user_id = state.creator_user_id
-    next_state.pending_return_to_user_id = request.return_to_user_id
+    next_state.current_assignee_id = state.creator_user_id
+    next_state.return_to_user_id = request.return_to_user_id
     next_state.public_status_message = request.question
   elif event_type == TicketEventType.CITIZEN_RESPONDED:
     response = validated
     assert isinstance(response, CitizenRespondedPayload)
     next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
-    next_state.current_responsible_user_id = response.return_to_user_id
-    next_state.pending_return_to_user_id = None
+    next_state.current_assignee_id = response.return_to_user_id
+    next_state.return_to_user_id = None
     next_state.public_status_message = "Citizen response received"
   elif event_type == TicketEventType.TICKET_ESCALATED:
     escalation = validated
     assert isinstance(escalation, TicketEscalatedPayload)
     next_state.workflow_state = TicketWorkflowState.WAITING_FOR_DECISION
-    next_state.current_responsible_user_id = escalation.manager_user_id
-    next_state.pending_return_to_user_id = escalation.return_to_user_id
+    next_state.current_assignee_id = escalation.manager_user_id
+    next_state.return_to_user_id = escalation.return_to_user_id
   elif event_type == TicketEventType.ESCALATION_DECIDED:
     decision = validated
     assert isinstance(decision, EscalationDecisionPayload)
     next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
-    next_state.current_responsible_user_id = decision.return_to_user_id
-    next_state.pending_return_to_user_id = None
+    next_state.current_assignee_id = decision.return_to_user_id
+    next_state.return_to_user_id = None
     if decision.decision == EscalationDecision.APPROVED:
       next_state.public_status_message = (
         decision.comment or "Proposed measure approved"
@@ -177,8 +177,8 @@ def evolve_ticket(
     next_state.public_status = TicketStatus(completed.outcome.value)
     next_state.public_status_message = completed.message
     next_state.workflow_state = TicketWorkflowState.COMPLETED
-    next_state.current_responsible_user_id = None
-    next_state.pending_return_to_user_id = None
+    next_state.current_assignee_id = None
+    next_state.return_to_user_id = None
     next_state.completed_at = occurred_at
   # Comment and image events update separate projections. They still advance
   # the aggregate version so the full event stream remains strictly ordered.

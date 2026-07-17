@@ -5,12 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
-from src.ticket.schemas.base import TicketApiModel, _normalize_optional_text, _normalize_required_text
+from src.core.validation import normalize_optional_text, normalize_required_text
 
-class TicketCommentCreateRequest(TicketApiModel):
-  """Creates one immutable ticket comment event."""
+
+class TicketCommentCreateRequest(BaseModel):
+  """Create one immutable ticket comment event."""
 
   text: str = Field(..., min_length=1, max_length=2000)
   is_internal: bool = False
@@ -18,10 +19,12 @@ class TicketCommentCreateRequest(TicketApiModel):
   @field_validator("text")
   @classmethod
   def normalize_text(cls, value: str) -> str:
-    return _normalize_required_text(value)
+    """Normalize comment whitespace."""
+
+    return normalize_required_text(value)
 
 
-class TicketCommentResponse(TicketApiModel):
+class TicketCommentResponse(BaseModel):
   """Comment projection reconstructed directly from a ticket event."""
 
   id: UUID
@@ -32,7 +35,7 @@ class TicketCommentResponse(TicketApiModel):
   created_at: datetime
 
 
-class TicketImageResponse(TicketApiModel):
+class TicketImageResponse(BaseModel):
   """Metadata for one current or historically removed ticket image."""
 
   id: UUID
@@ -48,7 +51,7 @@ class TicketImageResponse(TicketApiModel):
   removed_at: datetime | None = None
 
 
-class TicketImageRemoveRequest(TicketApiModel):
+class TicketImageRemoveRequest(BaseModel):
   """Optional explanation recorded with an image-removal event."""
 
   reason: str | None = Field(None, max_length=500)
@@ -56,4 +59,6 @@ class TicketImageRemoveRequest(TicketApiModel):
   @field_validator("reason")
   @classmethod
   def normalize_reason(cls, value: str | None) -> str | None:
-    return _normalize_optional_text(value)
+    """Normalize an optional removal reason."""
+
+    return normalize_optional_text(value)
