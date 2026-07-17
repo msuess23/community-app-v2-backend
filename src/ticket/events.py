@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
-from typing import Annotated, Any, Optional, TypeAlias
+from typing import Annotated, Any, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
@@ -97,6 +97,15 @@ class TicketWorkItemOutcome(str, enum.Enum):
   APPROVED = "APPROVED"
   REJECTED = "REJECTED"
   ACKNOWLEDGED = "ACKNOWLEDGED"
+
+
+class TicketWorkflowAction(str, enum.Enum):
+  """Workflow commands currently exposed by the administrative API."""
+
+  DISPATCH = "DISPATCH"
+  ASSIGN_PRIMARY_OFFICER = "ASSIGN_PRIMARY_OFFICER"
+  REQUEST_PARALLEL_COSIGNATURES = "REQUEST_PARALLEL_COSIGNATURES"
+  COMPLETE_WORK_ITEM = "COMPLETE_WORK_ITEM"
 
 
 class AddressSnapshot(BaseModel):

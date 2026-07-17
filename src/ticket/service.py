@@ -208,7 +208,7 @@ class TicketService:
       return False
     if current_user.id == ticket.creator_user_id:
       return True
-    if current_user.role in {Role.DISPATCHER, Role.ADMIN}:
+    if current_user.role == Role.DISPATCHER:
       return True
     if current_user.role in {Role.OFFICER, Role.MANAGER}:
       if current_user.id in {

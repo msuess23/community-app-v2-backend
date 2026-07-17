@@ -26,6 +26,7 @@ from src.ticket.events import (
   TicketVisibility,
   TicketWorkflowState,
   TicketWorkItemKind,
+  TicketWorkItemOutcome,
   TicketWorkItemStatus,
 )
 
@@ -202,6 +203,14 @@ class TicketWorkItem(Base):
   """
 
   __tablename__ = "ticket_work_items"
+  __table_args__ = (
+    UniqueConstraint(
+      "ticket_id",
+      "group_id",
+      "assignee_user_id",
+      name="uq_ticket_work_items_group_assignee",
+    ),
+  )
 
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
   ticket_id = Column(
@@ -220,6 +229,10 @@ class TicketWorkItem(Base):
     nullable=False,
     default=TicketWorkItemStatus.OPEN,
     index=True,
+  )
+  outcome = Column(
+    Enum(TicketWorkItemOutcome, native_enum=False, length=16),
+    nullable=True,
   )
   assignee_user_id = Column(
     UUID(as_uuid=True),

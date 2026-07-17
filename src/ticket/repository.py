@@ -1,4 +1,4 @@
-"""Database queries for ticket projections and event streams."""
+"""Database queries for ticket projections, event streams and workflow tasks."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, Tuple
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, exists, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -17,13 +17,15 @@ from src.ticket.events import (
   TicketCategory,
   TicketStatus,
   TicketVisibility,
+  TicketWorkflowState,
   TicketWorkItemStatus,
 )
 from src.ticket.models import Ticket, TicketEvent, TicketSortField, TicketWorkItem
+from src.user.models import Role, User
 
 
 class TicketRepository:
-  """Data access layer for the ticket read model and append-only events."""
+  """Data access layer for ticket projections and append-only event streams."""
 
   SORT_COLUMNS = {
     TicketSortField.CREATED_AT: Ticket.created_at,
@@ -164,6 +166,88 @@ class TicketRepository:
     return list(result.scalars().unique().all()), total
 
   @staticmethod
+  async def get_staff_page(
+    db: AsyncSession,
+    *,
+    current_user: User,
+    page: int,
+    size: int,
+    workflow_state: TicketWorkflowState | None = None,
+    status: TicketStatus | None = None,
+    category: TicketCategory | None = None,
+    search: str | None = None,
+    sort_by: TicketSortField = TicketSortField.UPDATED_AT,
+    order: SortOrder = SortOrder.DESC,
+  ) -> tuple[list[Ticket], int]:
+    """Returns a role-scoped work queue for the administrative client.
+
+    Dispatchers see the central routing queue. Managers see active tickets of
+    their office as well as cross-office tasks assigned to them. Officers see
+    tickets they own, coordinate, or have an open parallel task for.
+    """
+
+    open_task_for_user = exists(
+      select(TicketWorkItem.id).where(
+        TicketWorkItem.ticket_id == Ticket.id,
+        TicketWorkItem.assignee_user_id == current_user.id,
+        TicketWorkItem.status == TicketWorkItemStatus.OPEN,
+      )
+    )
+
+    query = select(Ticket).options(selectinload(Ticket.address))
+    if current_user.role == Role.DISPATCHER:
+      query = query.where(
+        Ticket.workflow_state.in_(
+          {
+            TicketWorkflowState.NEW,
+            TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
+          }
+        )
+      )
+    elif current_user.role == Role.MANAGER:
+      query = query.where(
+        Ticket.workflow_state != TicketWorkflowState.COMPLETED,
+        or_(
+          Ticket.office_id == current_user.office_id,
+          Ticket.primary_officer_id == current_user.id,
+          Ticket.current_responsible_user_id == current_user.id,
+          open_task_for_user,
+        ),
+      )
+    elif current_user.role == Role.OFFICER:
+      query = query.where(
+        Ticket.workflow_state != TicketWorkflowState.COMPLETED,
+        or_(
+          Ticket.primary_officer_id == current_user.id,
+          Ticket.current_responsible_user_id == current_user.id,
+          open_task_for_user,
+        ),
+      )
+    else:
+      # The service blocks this branch, but the defensive false predicate keeps
+      # accidental direct repository use from exposing authority-side data.
+      query = query.where(Ticket.id.is_(None))
+
+    query = apply_search_filter(query, search, Ticket.title, Ticket.description)
+    if workflow_state is not None:
+      query = query.where(Ticket.workflow_state == workflow_state)
+    if status is not None:
+      query = query.where(Ticket.public_status == status)
+    if category is not None:
+      query = query.where(Ticket.category == category)
+
+    count_query = select(func.count()).select_from(query.order_by(None).subquery())
+    total = int((await db.execute(count_query)).scalar_one())
+
+    sort_column = TicketRepository.SORT_COLUMNS[sort_by]
+    ordering = sort_column.desc() if order == SortOrder.DESC else sort_column.asc()
+    query = query.order_by(ordering, Ticket.id.asc())
+    query = query.offset((page - 1) * size).limit(size)
+
+    result = await db.execute(query)
+    return list(result.scalars().unique().all()), total
+
+  @staticmethod
   async def get_events(
     db: AsyncSession,
     ticket_id: uuid.UUID,
@@ -213,6 +297,53 @@ class TicketRepository:
     return {event.ticket_id: event for event in result.scalars().all()}
 
   @staticmethod
+  async def get_work_items(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+  ) -> list[TicketWorkItem]:
+    """Returns projected tasks in creation order for an internal detail view."""
+
+    result = await db.execute(
+      select(TicketWorkItem)
+      .where(TicketWorkItem.ticket_id == ticket_id)
+      .order_by(TicketWorkItem.created_at.asc(), TicketWorkItem.id.asc())
+    )
+    return list(result.scalars().all())
+
+  @staticmethod
+  async def get_work_item_for_update(
+    db: AsyncSession,
+    work_item_id: uuid.UUID,
+  ) -> TicketWorkItem | None:
+    """Locks one work item while its completion event is appended."""
+
+    result = await db.execute(
+      select(TicketWorkItem)
+      .where(TicketWorkItem.id == work_item_id)
+      .with_for_update()
+    )
+    return result.scalar_one_or_none()
+
+  @staticmethod
+  async def get_open_work_item_ids_for_user(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    user_id: uuid.UUID,
+  ) -> list[uuid.UUID]:
+    """Returns task IDs that the given user may complete on this ticket."""
+
+    result = await db.execute(
+      select(TicketWorkItem.id)
+      .where(
+        TicketWorkItem.ticket_id == ticket_id,
+        TicketWorkItem.assignee_user_id == user_id,
+        TicketWorkItem.status == TicketWorkItemStatus.OPEN,
+      )
+      .order_by(TicketWorkItem.created_at.asc(), TicketWorkItem.id.asc())
+    )
+    return list(result.scalars().all())
+
+  @staticmethod
   async def has_open_work_item_for_user(
     db: AsyncSession,
     ticket_id: uuid.UUID,
@@ -226,6 +357,24 @@ class TicketRepository:
         TicketWorkItem.ticket_id == ticket_id,
         TicketWorkItem.assignee_user_id == user_id,
         TicketWorkItem.status == TicketWorkItemStatus.OPEN,
+      )
+      .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+  @staticmethod
+  async def has_open_blocking_work_items(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+  ) -> bool:
+    """Checks whether a parallel round still contains unfinished blockers."""
+
+    result = await db.execute(
+      select(TicketWorkItem.id)
+      .where(
+        TicketWorkItem.ticket_id == ticket_id,
+        TicketWorkItem.status == TicketWorkItemStatus.OPEN,
+        TicketWorkItem.is_blocking.is_(True),
       )
       .limit(1)
     )

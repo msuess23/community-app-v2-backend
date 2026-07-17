@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any, Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -14,8 +14,10 @@ from src.ticket.events import (
   TicketEventType,
   TicketStatus,
   TicketVisibility,
+  TicketWorkflowAction,
   TicketWorkflowState,
   TicketWorkItemKind,
+  TicketWorkItemOutcome,
   TicketWorkItemStatus,
 )
 
@@ -118,6 +120,70 @@ class TicketCancelRequest(TicketApiModel):
     return _normalize_optional_text(value)
 
 
+class TicketDispatchRequest(TicketApiModel):
+  """Dispatcher command that selects the authority responsible for a ticket."""
+
+  office_id: UUID
+  comment: str | None = Field(None, max_length=1000)
+
+  @field_validator("comment")
+  @classmethod
+  def normalize_comment(cls, value: str | None) -> str | None:
+    return _normalize_optional_text(value)
+
+
+class PrimaryOfficerAssignmentRequest(TicketApiModel):
+  """Manager command that selects the permanent officer for a ticket."""
+
+  primary_officer_id: UUID
+  comment: str | None = Field(None, max_length=1000)
+
+  @field_validator("comment")
+  @classmethod
+  def normalize_comment(cls, value: str | None) -> str | None:
+    return _normalize_optional_text(value)
+
+
+class RequestParallelCosignaturesAction(TicketApiModel):
+  """Creates one bounded parallel cosignature round for staff members."""
+
+  action: Literal[TicketWorkflowAction.REQUEST_PARALLEL_COSIGNATURES]
+  assignee_user_ids: list[UUID] = Field(..., min_length=1, max_length=10)
+  comment: str | None = Field(None, max_length=1000)
+
+  @field_validator("assignee_user_ids")
+  @classmethod
+  def require_distinct_assignees(cls, values: list[UUID]) -> list[UUID]:
+    if len(values) != len(set(values)):
+      raise ValueError("assigneeUserIds must contain distinct users")
+    return values
+
+  @field_validator("comment")
+  @classmethod
+  def normalize_comment(cls, value: str | None) -> str | None:
+    return _normalize_optional_text(value)
+
+
+class CompleteWorkItemAction(TicketApiModel):
+  """Completes exactly one task without implicitly completing its siblings."""
+
+  action: Literal[TicketWorkflowAction.COMPLETE_WORK_ITEM]
+  work_item_id: UUID
+  outcome: TicketWorkItemOutcome
+  comment: str | None = Field(None, max_length=1000)
+
+  @field_validator("comment")
+  @classmethod
+  def normalize_comment(cls, value: str | None) -> str | None:
+    return _normalize_optional_text(value)
+
+
+TicketWorkflowRequest: TypeAlias = Annotated[
+  RequestParallelCosignaturesAction | CompleteWorkItemAction,
+  Field(discriminator="action"),
+]
+
+
 class TicketStatusResponse(TicketApiModel):
   """Citizen-visible status entry compatible with the former Ktor DTO."""
 
@@ -156,6 +222,13 @@ class TicketInternalResponse(TicketResponse):
   current_responsible_user_id: UUID | None = None
 
 
+class TicketAllowedActionsResponse(TicketApiModel):
+  """Commands currently available to the requesting staff member."""
+
+  actions: list[TicketWorkflowAction]
+  completable_work_item_ids: list[UUID] = Field(default_factory=list)
+
+
 class TicketEventResponse(TicketApiModel):
   """Internal chronological event record used by the future authority client."""
 
@@ -179,6 +252,7 @@ class TicketWorkItemResponse(TicketApiModel):
   group_id: UUID
   kind: TicketWorkItemKind
   status: TicketWorkItemStatus
+  outcome: TicketWorkItemOutcome | None = None
   assignee_user_id: UUID
   requested_by_user_id: UUID
   return_to_user_id: UUID
@@ -186,3 +260,10 @@ class TicketWorkItemResponse(TicketApiModel):
   comment: str | None = None
   created_at: datetime
   completed_at: datetime | None = None
+
+
+class TicketInternalDetailResponse(TicketInternalResponse):
+  """Internal detail response including projected tasks and allowed commands."""
+
+  work_items: list[TicketWorkItemResponse] = Field(default_factory=list)
+  allowed_actions: TicketAllowedActionsResponse
