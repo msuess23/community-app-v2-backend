@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,10 +9,12 @@ from src.office.models import Office
 from src.office.repository import OfficeRepository
 from src.office.service import OfficeService
 
+logger = logging.getLogger(__name__)
+
 
 async def run_office_seeder(db: AsyncSession, admin_id: uuid.UUID) -> None:
   """Seeds default offices, including their initial history snapshots."""
-  print("Seeding Offices...")
+  logger.info("Seeding offices")
 
   default_offices = [
     {
@@ -68,7 +71,7 @@ async def run_office_seeder(db: AsyncSession, admin_id: uuid.UUID) -> None:
   for office_data in default_offices:
     existing = await OfficeRepository.get_by_name(db, office_data["name"])
     if existing:
-      print(f"  -> Skipped: {office_data['name']} (Already exists)")
+      logger.info("Skipped existing office: %s", office_data["name"])
       continue
 
     address_entity = None
@@ -97,4 +100,4 @@ async def run_office_seeder(db: AsyncSession, admin_id: uuid.UUID) -> None:
       change_reason="OFFICE_SEEDED",
     )
     await db.flush()
-    print(f"  -> Created Office: {new_office.name}")
+    logger.info("Created office: %s", new_office.name)

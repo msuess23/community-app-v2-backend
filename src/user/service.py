@@ -247,9 +247,13 @@ class UserService:
     await db.flush()
 
   @staticmethod
-  async def run_deep_anonymization(db: AsyncSession) -> None:
+  async def run_deep_anonymization(
+    db: AsyncSession,
+    *,
+    retention_days: int = 180,
+  ) -> None:
     """Anonymizes only old history snapshots belonging to deleted citizens."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=180)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     await UserRepository.bulk_anonymize_citizen_history(db, cutoff)
 
   @staticmethod

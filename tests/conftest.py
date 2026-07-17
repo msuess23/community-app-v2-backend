@@ -17,3 +17,8 @@ os.environ.setdefault("POSTGRES_PASSWORD", "test")
 os.environ.setdefault("POSTGRES_DB", "test")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
+
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("RUN_SEED_ON_STARTUP", "false")
+os.environ.setdefault("ENABLE_SCHEDULER", "false")
+os.environ.setdefault("CORS_ORIGINS", '["http://testserver"]')

@@ -1,20 +1,23 @@
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.security import get_password_hash
 from src.office.repository import OfficeRepository
 from src.user.models import Role, User
 from src.user.repository import UserRepository
 from src.user.service import UserService
 
+logger = logging.getLogger(__name__)
+
 
 async def run_user_seeder(
   db: AsyncSession,
   *,
+  password_hash: str,
   only_admin: bool = False,
   skip_admin: bool = False,
 ) -> User | None:
   """Seeds demo users and returns the admin account when available."""
-  print("Seeding Users...")
+  logger.info("Seeding users")
 
   bauamt = None
   buergeramt = None
@@ -22,7 +25,9 @@ async def run_user_seeder(
     bauamt = await OfficeRepository.get_by_name(db, "Bauamt")
     buergeramt = await OfficeRepository.get_by_name(db, "Bürgeramt")
 
-  default_password = get_password_hash("password123")
+    if bauamt is None or buergeramt is None:
+      raise RuntimeError("Required seed offices are missing")
+
   default_users = [
     {
       "email": "admin@test.com",
@@ -132,12 +137,12 @@ async def run_user_seeder(
     if existing:
       if existing.role == Role.ADMIN:
         admin = existing
-      print(f"  -> Skipped: {user_data['email']} (Already exists)")
+      logger.info("Skipped existing user: %s", user_data["email"])
       continue
 
     new_user = User(
       email=user_data["email"],
-      hashed_password=default_password,
+      hashed_password=password_hash,
       first_name=user_data["first_name"],
       last_name=user_data["last_name"],
       role=user_data["role"],
@@ -155,6 +160,6 @@ async def run_user_seeder(
 
     if new_user.role == Role.ADMIN:
       admin = new_user
-    print(f"  -> Created User: {new_user.email} ({new_user.role})")
+    logger.info("Created user: %s (%s)", new_user.email, new_user.role)
 
   return admin
