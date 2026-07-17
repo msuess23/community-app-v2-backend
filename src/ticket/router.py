@@ -4,7 +4,8 @@ import uuid
 from datetime import datetime
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Body, Depends, Query, Response, status
+from fastapi import APIRouter, Body, Depends, File, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import (
@@ -17,6 +18,7 @@ from src.core.filters import SortOrder, get_bbox_filter
 from src.core.schemas import PaginatedResponse
 from src.ticket.comment_service import TicketCommentService
 from src.ticket.events import TicketCategory, TicketStatus, TicketWorkflowState
+from src.ticket.image_service import TicketImageService
 from src.ticket.models import TicketSortField
 from src.ticket.schemas import (
   PrimaryOfficerAssignmentRequest,
@@ -29,13 +31,17 @@ from src.ticket.schemas import (
   TicketDispatchRequest,
   TicketEventResponse,
   TicketInternalDetailResponse,
+  TicketImageRemoveRequest,
+  TicketImageResponse,
   TicketInternalResponse,
   TicketResponse,
   TicketStatusResponse,
   TicketUpdateRequest,
+  TicketVoteResponse,
   TicketWorkflowRequest,
 )
 from src.ticket.service import TicketService
+from src.ticket.vote_service import TicketVoteService
 from src.ticket.workflow_service import TicketWorkflowService
 from src.user.models import Role, User
 
@@ -301,6 +307,136 @@ async def add_ticket_comment(
   """Appends an immutable citizen-visible comment or internal staff note."""
 
   return await TicketCommentService.add_comment(db, ticket_id, request, current_user)
+
+
+@router.get("/{ticket_id}/vote", response_model=TicketVoteResponse)
+async def get_ticket_vote_summary(
+  ticket_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db),
+  current_user: User | None = Depends(get_optional_current_user),
+):
+  """Returns the community vote count and caller-specific vote state."""
+
+  return await TicketVoteService.get_summary(db, ticket_id, current_user)
+
+
+@router.post("/{ticket_id}/vote", response_model=TicketVoteResponse)
+async def vote_for_ticket(
+  ticket_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(role_required(Role.CITIZEN)),
+):
+  """Adds one citizen vote to a public ticket."""
+
+  return await TicketVoteService.add_vote(db, ticket_id, current_user)
+
+
+@router.delete("/{ticket_id}/vote", response_model=TicketVoteResponse)
+async def remove_ticket_vote(
+  ticket_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(role_required(Role.CITIZEN)),
+):
+  """Removes the current citizen's vote from a public ticket."""
+
+  return await TicketVoteService.remove_vote(db, ticket_id, current_user)
+
+
+@router.get("/{ticket_id}/images", response_model=list[TicketImageResponse])
+async def list_ticket_images(
+  ticket_id: uuid.UUID,
+  include_removed: bool = Query(False, alias="includeRemoved"),
+  db: AsyncSession = Depends(get_db),
+  current_user: User | None = Depends(get_optional_current_user),
+):
+  """Lists active ticket images or the full staff audit view."""
+
+  return await TicketImageService.list_images(
+    db,
+    ticket_id,
+    current_user,
+    include_removed=include_removed,
+  )
+
+
+@router.post(
+  "/{ticket_id}/images",
+  response_model=TicketImageResponse,
+  status_code=status.HTTP_201_CREATED,
+)
+async def upload_ticket_image(
+  ticket_id: uuid.UUID,
+  file: UploadFile = File(...),
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(get_current_user),
+):
+  """Uploads an image and records immutable metadata in the ticket stream."""
+
+  return await TicketImageService.add_image(db, ticket_id, file, current_user)
+
+
+@router.put(
+  "/{ticket_id}/images/{image_id}/cover",
+  response_model=TicketImageResponse,
+)
+async def set_ticket_cover_image(
+  ticket_id: uuid.UUID,
+  image_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(get_current_user),
+):
+  """Selects the image exposed through the legacy imageUrl field."""
+
+  return await TicketImageService.set_cover(
+    db,
+    ticket_id,
+    image_id,
+    current_user,
+  )
+
+
+@router.delete(
+  "/{ticket_id}/images/{image_id}",
+  status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_ticket_image(
+  ticket_id: uuid.UUID,
+  image_id: uuid.UUID,
+  request: TicketImageRemoveRequest = Body(default_factory=TicketImageRemoveRequest),
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(get_current_user),
+):
+  """Removes an image from the current projection without deleting its file."""
+
+  await TicketImageService.remove_image(
+    db,
+    ticket_id,
+    image_id,
+    request,
+    current_user,
+  )
+
+
+@router.get("/{ticket_id}/images/{image_id}/content", response_class=FileResponse)
+async def get_ticket_image_content(
+  ticket_id: uuid.UUID,
+  image_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db),
+  current_user: User | None = Depends(get_optional_current_user),
+):
+  """Streams current images and authorized historical image revisions."""
+
+  path, image = await TicketImageService.get_content(
+    db,
+    ticket_id,
+    image_id,
+    current_user,
+  )
+  return FileResponse(
+    path=path,
+    media_type=image.mime_type,
+    filename=image.original_filename,
+  )
 
 
 @router.post("", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)

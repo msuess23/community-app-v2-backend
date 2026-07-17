@@ -85,6 +85,12 @@ class TicketWorkflowService:
       current_status_event=current_status_event,
       current_user=current_user,
     )
+    # Every officer or manager who passed the internal visibility check may add
+    # revisioned evidence while the administrative workflow is still active.
+    public_response.can_manage_images = (
+      current_user.role in {Role.OFFICER, Role.MANAGER}
+      and ticket.workflow_state != TicketWorkflowState.COMPLETED
+    )
     return TicketInternalResponse(
       **public_response.model_dump(),
       workflow_state=ticket.workflow_state,

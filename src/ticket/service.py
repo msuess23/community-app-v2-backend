@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.address.models import Address
 from src.address.schemas import AddressCreate, AddressResponse
 from src.address.service import AddressService
+from src.core.config import settings
 from src.core.exceptions import (
   ConflictException,
   ForbiddenException,
@@ -32,6 +33,7 @@ from src.ticket.events import (
   TicketVisibility,
   TicketWorkflowState,
   evolve_ticket,
+  rebuild_ticket,
 )
 from src.ticket.models import Ticket, TicketEvent, TicketSortField
 from src.ticket.repository import TicketRepository
@@ -262,6 +264,30 @@ class TicketService:
       and current_user.id == ticket.creator_user_id
       and ticket.workflow_state == TicketWorkflowState.NEW
     )
+    active_images = [
+      image for image in getattr(ticket, "images", []) if image.is_active
+    ]
+    cover_image = next(
+      (image for image in active_images if image.is_cover),
+      active_images[0] if active_images else None,
+    )
+    votes = list(getattr(ticket, "votes", []))
+    can_manage_images = can_edit
+    if current_user is not None and current_user.role in {Role.OFFICER, Role.MANAGER}:
+      can_manage_images = (
+        ticket.workflow_state != TicketWorkflowState.COMPLETED
+        and (
+          current_user.id in {
+            ticket.primary_officer_id,
+            ticket.current_responsible_user_id,
+          }
+          or (
+            current_user.office_id is not None
+            and current_user.office_id == ticket.office_id
+          )
+        )
+      )
+
     return TicketResponse(
       id=ticket.id,
       title=ticket.title,
@@ -277,10 +303,19 @@ class TicketService:
       visibility=ticket.visibility,
       created_at=ticket.created_at,
       current_status=TicketService._status_response(current_status_event),
-      votes_count=0,
-      user_voted=(False if current_user is not None else None),
-      image_url=None,
+      votes_count=len(votes),
+      user_voted=(
+        any(vote.user_id == current_user.id for vote in votes)
+        if current_user is not None
+        else None
+      ),
+      image_url=(
+        f"{settings.BASE_URL}/tickets/{ticket.id}/images/{cover_image.id}/content"
+        if cover_image is not None
+        else None
+      ),
       can_edit=can_edit,
+      can_manage_images=can_manage_images,
       version=ticket.version,
     )
 
@@ -570,3 +605,41 @@ class TicketService:
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
     latest = await TicketRepository.get_latest_public_events(db, [ticket.id])
     return TicketService._status_response(latest.get(ticket.id))
+
+
+  @staticmethod
+  async def rebuild_from_event_stream(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+  ) -> TicketAggregateState:
+    """Rebuilds one ticket solely from its persisted append-only events."""
+
+    events = await TicketRepository.get_events(db, ticket_id)
+    if not events:
+      raise ResourceNotFoundException(
+        "Ticket not found",
+        error_code="TICKET_NOT_FOUND",
+      )
+    return rebuild_ticket(
+      [
+        (event.event_type, event.payload, event.occurred_at)
+        for event in events
+      ]
+    )
+
+  @staticmethod
+  async def projection_matches_event_stream(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+  ) -> bool:
+    """Compares the query projection with a deterministic event replay."""
+
+    ticket = await TicketRepository.get_by_id(db, ticket_id)
+    if ticket is None:
+      raise ResourceNotFoundException(
+        "Ticket not found",
+        error_code="TICKET_NOT_FOUND",
+      )
+    rebuilt = await TicketService.rebuild_from_event_stream(db, ticket_id)
+    projected = TicketService._state_from_ticket(ticket)
+    return rebuilt == projected

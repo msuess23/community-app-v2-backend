@@ -1,9 +1,16 @@
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
-from src.ticket.events import TicketCategory, TicketEventType, TicketStatus, TicketWorkflowState
+from src.ticket.events import (
+  TicketCategory,
+  TicketEventType,
+  TicketStatus,
+  TicketVisibility,
+  TicketWorkflowState,
+)
 from src.ticket.models import Ticket, TicketEvent
 from src.ticket.schemas import TicketCreateRequest
 from src.ticket.service import TicketService
@@ -56,3 +63,36 @@ async def test_create_ticket_stages_projection_and_initial_event(monkeypatch) ->
   assert response.current_status is not None
   assert response.current_status.status == TicketStatus.OPEN
   db.flush.assert_awaited_once()
+
+
+def test_ticket_response_locks_citizen_edits_after_processing_starts() -> None:
+  citizen = User(
+    id=uuid4(),
+    email="locked@example.com",
+    hashed_password="hash",
+    first_name="Locked",
+    last_name="Citizen",
+    role=Role.CITIZEN,
+    is_active=True,
+  )
+  ticket = Ticket(
+    id=uuid4(),
+    title="Already dispatched",
+    category=TicketCategory.INFRASTRUCTURE,
+    creator_user_id=citizen.id,
+    workflow_state=TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
+    visibility=TicketVisibility.PUBLIC,
+    created_at=datetime.now(timezone.utc),
+    version=2,
+    votes=[],
+    images=[],
+  )
+
+  response = TicketService._ticket_response(
+    ticket,
+    current_status_event=None,
+    current_user=citizen,
+  )
+
+  assert response.can_edit is False
+  assert response.can_manage_images is False

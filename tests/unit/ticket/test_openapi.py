@@ -22,3 +22,13 @@ def test_ticket_openapi_exposes_authority_workflow_endpoints() -> None:
   assert "/api/v1/tickets/{ticket_id}/dispatch" in paths
   assert "/api/v1/tickets/{ticket_id}/primary-officer" in paths
   assert "/api/v1/tickets/{ticket_id}/workflow" in paths
+
+
+def test_ticket_openapi_exposes_vote_and_revisioned_image_endpoints() -> None:
+  schema = app.openapi()
+  paths = schema["paths"]
+
+  assert "/api/v1/tickets/{ticket_id}/vote" in paths
+  assert "/api/v1/tickets/{ticket_id}/images" in paths
+  assert "/api/v1/tickets/{ticket_id}/images/{image_id}/cover" in paths
+  assert "/api/v1/tickets/{ticket_id}/images/{image_id}/content" in paths

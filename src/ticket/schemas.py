@@ -319,6 +319,7 @@ class TicketResponse(TicketApiModel):
   user_voted: bool | None = None
   image_url: str | None = None
   can_edit: bool = False
+  can_manage_images: bool = False
   version: int
 
 
@@ -411,3 +412,38 @@ class TicketCommentResponse(TicketApiModel):
   is_internal: bool
   author_user_id: UUID
   created_at: datetime
+
+
+class TicketVoteResponse(TicketApiModel):
+  """Community vote summary compatible with the former Ktor endpoints."""
+
+  ticket_id: UUID
+  votes_count: int
+  user_voted: bool | None = None
+
+
+class TicketImageResponse(TicketApiModel):
+  """Metadata for one current or historically removed ticket image."""
+
+  id: UUID
+  ticket_id: UUID
+  url: str
+  original_filename: str
+  mime_type: str
+  size_bytes: int
+  uploaded_by_user_id: UUID
+  uploaded_at: datetime
+  is_active: bool
+  is_cover: bool
+  removed_at: datetime | None = None
+
+
+class TicketImageRemoveRequest(TicketApiModel):
+  """Optional explanation recorded with an image-removal event."""
+
+  reason: str | None = Field(None, max_length=500)
+
+  @field_validator("reason")
+  @classmethod
+  def normalize_reason(cls, value: str | None) -> str | None:
+    return _normalize_optional_text(value)

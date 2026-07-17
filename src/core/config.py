@@ -30,6 +30,13 @@ class Settings(BaseSettings):
   DEEP_ANONYMIZATION_MINUTE: int = Field(default=0, ge=0, le=59)
   CITIZEN_HISTORY_RETENTION_DAYS: int = Field(default=180, ge=1)
 
+  # Ticket image storage used by the event-sourced media projection
+  TICKET_MEDIA_ROOT: str = "./data/ticket-media"
+  TICKET_IMAGE_MAX_BYTES: int = Field(default=5 * 1024 * 1024, ge=1)
+  TICKET_IMAGE_ALLOWED_MIME_TYPES: list[str] = Field(
+    default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
+  )
+
   # Database atomic variables
   POSTGRES_USER: str = Field(min_length=1)
   POSTGRES_PASSWORD: str = Field(min_length=1)
@@ -58,6 +65,9 @@ class Settings(BaseSettings):
 
     if self.SEED_DEFAULT_PASSWORD is not None and len(self.SEED_DEFAULT_PASSWORD) < 8:
       raise ValueError("SEED_DEFAULT_PASSWORD must contain at least 8 characters")
+
+    if not self.TICKET_IMAGE_ALLOWED_MIME_TYPES:
+      raise ValueError("TICKET_IMAGE_ALLOWED_MIME_TYPES must not be empty")
 
     return self
 

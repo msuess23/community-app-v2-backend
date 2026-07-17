@@ -248,3 +248,53 @@ def test_citizen_response_round_trip_uses_pending_return_target() -> None:
   assert state.current_responsible_user_id == officer_id
   assert state.pending_return_to_user_id is None
   assert state.workflow_state == TicketWorkflowState.IN_PROGRESS
+
+
+def test_image_events_are_part_of_the_aggregate_sequence() -> None:
+  from src.ticket.events import (
+    TicketCoverImageChangedPayload,
+    TicketImageAddedPayload,
+    TicketImageRemovedPayload,
+  )
+
+  now = datetime.now(timezone.utc)
+  image_id = uuid4()
+  state = evolve_ticket(
+    None,
+    TicketEventType.TICKET_SUBMITTED,
+    TicketSubmittedPayload(
+      title="Broken pavement",
+      category=TicketCategory.INFRASTRUCTURE,
+      creator_user_id=uuid4(),
+    ),
+    occurred_at=now,
+  )
+  state = evolve_ticket(
+    state,
+    TicketEventType.TICKET_IMAGE_ADDED,
+    TicketImageAddedPayload(
+      image_id=image_id,
+      storage_key=f"ticket/{image_id}.jpg",
+      original_filename="damage.jpg",
+      mime_type="image/jpeg",
+      size_bytes=123,
+      is_cover=True,
+    ),
+    occurred_at=now + timedelta(seconds=1),
+  )
+  state = evolve_ticket(
+    state,
+    TicketEventType.TICKET_COVER_IMAGE_CHANGED,
+    TicketCoverImageChangedPayload(image_id=image_id),
+    occurred_at=now + timedelta(seconds=2),
+  )
+  state = evolve_ticket(
+    state,
+    TicketEventType.TICKET_IMAGE_REMOVED,
+    TicketImageRemovedPayload(image_id=image_id, reason="Blurred image"),
+    occurred_at=now + timedelta(seconds=3),
+  )
+
+  assert state.version == 4
+  assert state.title == "Broken pavement"
+  assert state.workflow_state == TicketWorkflowState.NEW

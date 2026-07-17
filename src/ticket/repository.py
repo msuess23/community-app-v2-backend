@@ -21,7 +21,14 @@ from src.ticket.events import (
   TicketWorkflowState,
   TicketWorkItemStatus,
 )
-from src.ticket.models import Ticket, TicketEvent, TicketSortField, TicketWorkItem
+from src.ticket.models import (
+  Ticket,
+  TicketEvent,
+  TicketImage,
+  TicketSortField,
+  TicketVote,
+  TicketWorkItem,
+)
 from src.user.models import Role, User
 
 
@@ -59,7 +66,11 @@ class TicketRepository:
 
     result = await db.execute(
       select(Ticket)
-      .options(selectinload(Ticket.address))
+      .options(
+        selectinload(Ticket.address),
+        selectinload(Ticket.votes),
+        selectinload(Ticket.images),
+      )
       .where(Ticket.id == ticket_id)
     )
     return result.scalar_one_or_none()
@@ -73,7 +84,11 @@ class TicketRepository:
 
     result = await db.execute(
       select(Ticket)
-      .options(selectinload(Ticket.address))
+      .options(
+        selectinload(Ticket.address),
+        selectinload(Ticket.votes),
+        selectinload(Ticket.images),
+      )
       .where(Ticket.id == ticket_id)
       .with_for_update()
     )
@@ -99,7 +114,11 @@ class TicketRepository:
 
     query = (
       select(Ticket)
-      .options(selectinload(Ticket.address))
+      .options(
+        selectinload(Ticket.address),
+        selectinload(Ticket.votes),
+        selectinload(Ticket.images),
+      )
       .where(Ticket.visibility == TicketVisibility.PUBLIC)
     )
     query = apply_search_filter(query, search, Ticket.title, Ticket.description)
@@ -146,7 +165,11 @@ class TicketRepository:
 
     query = (
       select(Ticket)
-      .options(selectinload(Ticket.address))
+      .options(
+        selectinload(Ticket.address),
+        selectinload(Ticket.votes),
+        selectinload(Ticket.images),
+      )
       .where(Ticket.creator_user_id == creator_user_id)
     )
     query = apply_search_filter(query, search, Ticket.title, Ticket.description)
@@ -195,7 +218,11 @@ class TicketRepository:
       )
     )
 
-    query = select(Ticket).options(selectinload(Ticket.address))
+    query = select(Ticket).options(
+        selectinload(Ticket.address),
+        selectinload(Ticket.votes),
+        selectinload(Ticket.images),
+      )
     if current_user.role == Role.DISPATCHER:
       query = query.where(
         Ticket.workflow_state.in_(
@@ -431,5 +458,82 @@ class TicketRepository:
         TicketEvent.event_type == TicketEventType.TICKET_COMMENTED,
       )
       .order_by(TicketEvent.sequence_number.asc())
+    )
+    return list(result.scalars().all())
+
+
+  @staticmethod
+  def add_vote(db: AsyncSession, vote: TicketVote) -> None:
+    """Stages one unique community vote for insertion."""
+
+    db.add(vote)
+
+  @staticmethod
+  async def get_vote(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    user_id: uuid.UUID,
+  ) -> TicketVote | None:
+    """Returns the caller's vote for one ticket, if present."""
+
+    result = await db.execute(
+      select(TicketVote).where(
+        TicketVote.ticket_id == ticket_id,
+        TicketVote.user_id == user_id,
+      )
+    )
+    return result.scalar_one_or_none()
+
+  @staticmethod
+  async def count_votes(db: AsyncSession, ticket_id: uuid.UUID) -> int:
+    """Counts all current community votes for one ticket."""
+
+    result = await db.execute(
+      select(func.count(TicketVote.id)).where(TicketVote.ticket_id == ticket_id)
+    )
+    return int(result.scalar_one())
+
+  @staticmethod
+  def add_image(db: AsyncSession, image: TicketImage) -> None:
+    """Stages one ticket-image projection row."""
+
+    db.add(image)
+
+  @staticmethod
+  async def get_image(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    image_id: uuid.UUID,
+    *,
+    for_update: bool = False,
+  ) -> TicketImage | None:
+    """Loads one image that belongs to a ticket, optionally with a row lock."""
+
+    query = select(TicketImage).where(
+      TicketImage.id == image_id,
+      TicketImage.ticket_id == ticket_id,
+    )
+    if for_update:
+      query = query.with_for_update()
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+  @staticmethod
+  async def get_images(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    *,
+    include_removed: bool = False,
+    for_update: bool = False,
+  ) -> list[TicketImage]:
+    """Lists image projections in upload order."""
+
+    query = select(TicketImage).where(TicketImage.ticket_id == ticket_id)
+    if not include_removed:
+      query = query.where(TicketImage.is_active.is_(True))
+    if for_update:
+      query = query.with_for_update()
+    result = await db.execute(
+      query.order_by(TicketImage.uploaded_at.asc(), TicketImage.id.asc())
     )
     return list(result.scalars().all())

@@ -73,6 +73,9 @@ class TicketEventType(str, enum.Enum):
   TICKET_RESOLVED = "TICKET_RESOLVED"
   TICKET_REJECTED = "TICKET_REJECTED"
   TICKET_COMMENTED = "TICKET_COMMENTED"
+  TICKET_IMAGE_ADDED = "TICKET_IMAGE_ADDED"
+  TICKET_IMAGE_REMOVED = "TICKET_IMAGE_REMOVED"
+  TICKET_COVER_IMAGE_CHANGED = "TICKET_COVER_IMAGE_CHANGED"
 
 
 class TicketWorkItemKind(str, enum.Enum):
@@ -254,10 +257,34 @@ class TicketCompletedPayload(BaseModel):
 
 
 class TicketCommentedPayload(BaseModel):
-  """Append-only comment payload for the later workflow patch."""
+  """Append-only public comment or internal case-note payload."""
 
   text: str
   is_internal: bool = True
+
+
+class TicketImageAddedPayload(BaseModel):
+  """Immutable metadata for one file added to a ticket."""
+
+  image_id: UUID
+  storage_key: str
+  original_filename: str
+  mime_type: str
+  size_bytes: int
+  is_cover: bool
+
+
+class TicketImageRemovedPayload(BaseModel):
+  """Marks a projected image as removed without deleting its stored file."""
+
+  image_id: UUID
+  reason: str | None = None
+
+
+class TicketCoverImageChangedPayload(BaseModel):
+  """Selects the image represented by the legacy imageUrl response field."""
+
+  image_id: UUID
 
 
 EventPayload: TypeAlias = (
@@ -276,6 +303,9 @@ EventPayload: TypeAlias = (
   | EscalationDecisionPayload
   | TicketCompletedPayload
   | TicketCommentedPayload
+  | TicketImageAddedPayload
+  | TicketImageRemovedPayload
+  | TicketCoverImageChangedPayload
 )
 
 
@@ -297,6 +327,9 @@ _EVENT_PAYLOAD_TYPES: dict[TicketEventType, type[BaseModel]] = {
   TicketEventType.TICKET_RESOLVED: TicketCompletedPayload,
   TicketEventType.TICKET_REJECTED: TicketCompletedPayload,
   TicketEventType.TICKET_COMMENTED: TicketCommentedPayload,
+  TicketEventType.TICKET_IMAGE_ADDED: TicketImageAddedPayload,
+  TicketEventType.TICKET_IMAGE_REMOVED: TicketImageRemovedPayload,
+  TicketEventType.TICKET_COVER_IMAGE_CHANGED: TicketCoverImageChangedPayload,
 }
 
 
@@ -458,8 +491,8 @@ def evolve_ticket(
     next_state.current_responsible_user_id = None
     next_state.pending_return_to_user_id = None
     next_state.resolved_at = occurred_at
-  # Work-item and comment events update their own read models.  They still
-  # advance the aggregate version so the complete event stream stays ordered.
+  # Work-item, comment and image events update their own read models.  They
+  # still advance the aggregate version so the complete stream stays ordered.
 
   return next_state
 
