@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import src.auth.models
 import src.office.models
+import src.ticket.models
 import src.user.models
 from scripts.seed.run_seed import seed_database
 from src.auth.router import router as auth_router
@@ -24,6 +25,7 @@ from src.core.error_handlers import (
 from src.core.exceptions import DomainException
 from src.core.scheduler import setup_scheduler, shutdown_scheduler
 from src.office.router import router as office_router
+from src.ticket.router import router as ticket_router
 from src.user.router import router as user_router
 
 logger = logging.getLogger(__name__)
@@ -87,6 +89,11 @@ app.include_router(
   office_router,
   prefix=f"{settings.BASE_URL}/offices",
   tags=["Offices"],
+)
+app.include_router(
+  ticket_router,
+  prefix=f"{settings.BASE_URL}/tickets",
+  tags=["Tickets"],
 )
 
 

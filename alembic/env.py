@@ -15,6 +15,7 @@ from src.user.models import User, UserHistory
 from src.office.models import Office, OfficeHistory
 from src.auth.models import PasswordReset, RefreshToken
 from src.address.models import Address
+from src.ticket.models import Ticket, TicketEvent, TicketWorkItem
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
