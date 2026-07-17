@@ -57,7 +57,7 @@ async def test_create_ticket_stages_projection_and_initial_event(monkeypatch) ->
   assert ticket.current_responsible_user_id is None
   assert event.event_type == TicketEventType.TICKET_SUBMITTED
   assert event.sequence_number == 1
-  assert event.public_status == TicketStatus.OPEN
+  assert ticket.public_status == TicketStatus.OPEN
   assert "office_id" not in event.payload
   assert response.office_id is None
   assert response.current_status is not None
@@ -84,7 +84,6 @@ def test_ticket_response_locks_citizen_edits_after_processing_starts() -> None:
     visibility=TicketVisibility.PUBLIC,
     created_at=datetime.now(timezone.utc),
     version=2,
-    votes=[],
     images=[],
   )
 

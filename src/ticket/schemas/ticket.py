@@ -101,8 +101,6 @@ class TicketResponse(TicketApiModel):
   visibility: TicketVisibility
   created_at: datetime
   current_status: TicketStatusResponse | None = None
-  votes_count: int = 0
-  user_voted: bool | None = None
   image_url: str | None = None
   can_edit: bool = False
   can_manage_images: bool = False

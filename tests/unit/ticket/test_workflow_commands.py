@@ -6,7 +6,9 @@ import pytest
 
 from src.core.exceptions import ForbiddenException
 from src.ticket.events import (
+  EscalationDecision,
   TicketCategory,
+  TicketCompletionOutcome,
   TicketEventType,
   TicketStatus,
   TicketVisibility,
@@ -15,13 +17,10 @@ from src.ticket.events import (
 )
 from src.ticket.models import Ticket, TicketEvent
 from src.ticket.schemas import (
-  ApproveEscalationAction,
-  EscalateTicketAction,
-  ForwardTicketAction,
-  RejectTicketAction,
-  RequestCitizenResponseAction,
-  ResolveTicketAction,
-  TicketCitizenResponseRequest,
+  CompleteTicketAction,
+  CosignTicketAction,
+  DecideEscalationAction,
+  RequestCosignatureAction,
 )
 from src.ticket.workflow_command_service import TicketWorkflowCommandService
 from src.user.models import Role, User
@@ -44,7 +43,6 @@ def _ticket(
   creator_id: UUID,
   *,
   coordinator_id: UUID,
-  primary_officer_id: UUID | None = None,
   workflow_state: TicketWorkflowState = TicketWorkflowState.IN_PROGRESS,
   pending_return_to_user_id: UUID | None = None,
   version: int = 3,
@@ -56,12 +54,11 @@ def _ticket(
     description="Deep road damage",
     category=TicketCategory.INFRASTRUCTURE,
     creator_user_id=creator_id,
-    office_id=uuid4(),
     visibility=TicketVisibility.PUBLIC,
     public_status=TicketStatus.IN_PROGRESS,
     public_status_message="In progress",
     workflow_state=workflow_state,
-    primary_officer_id=primary_officer_id,
+    primary_officer_id=coordinator_id,
     current_responsible_user_id=coordinator_id,
     pending_return_to_user_id=pending_return_to_user_id,
     version=version,
@@ -70,221 +67,124 @@ def _ticket(
   )
 
 
-def _mock_event_writes(monkeypatch, events: list[TicketEvent]) -> None:
+def _mock_event_writes(monkeypatch, staged: list[TicketEvent]) -> None:
   monkeypatch.setattr(
     "src.ticket.repository.TicketRepository.add",
     lambda _db, _ticket: None,
   )
   monkeypatch.setattr(
     "src.ticket.repository.TicketRepository.add_event",
-    lambda _db, event: events.append(event),
+    lambda _db, event: staged.append(event),
   )
 
 
 @pytest.mark.asyncio
-async def test_forward_changes_current_responsible_but_not_primary(monkeypatch) -> None:
+async def test_cosignature_is_sequential_and_returns_to_requester(monkeypatch) -> None:
   db = AsyncMock()
-  primary = _user(Role.OFFICER, office_id=uuid4())
-  target = _user(Role.MANAGER, office_id=uuid4())
-  ticket = _ticket(
-    uuid4(),
-    coordinator_id=primary.id,
-    primary_officer_id=primary.id,
-  )
-  events: list[TicketEvent] = []
+  requester = _user(Role.OFFICER, office_id=uuid4())
+  cosigner = _user(Role.MANAGER, office_id=uuid4())
+  ticket = _ticket(uuid4(), coordinator_id=requester.id)
+  staged: list[TicketEvent] = []
 
   monkeypatch.setattr(
     "src.ticket.repository.TicketRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.has_open_blocking_work_items",
-    AsyncMock(return_value=False),
-  )
-  monkeypatch.setattr(
     "src.user.repository.UserRepository.get_by_id",
-    AsyncMock(return_value=target),
+    AsyncMock(side_effect=[cosigner, requester]),
   )
-  _mock_event_writes(monkeypatch, events)
+  _mock_event_writes(monkeypatch, staged)
 
-  await TicketWorkflowCommandService.forward_ticket(
+  await TicketWorkflowCommandService.request_cosignature(
     db,
     ticket.id,
-    ForwardTicketAction(
-      action=TicketWorkflowAction.FORWARD,
-      targetUserId=target.id,
-      comment="Please continue processing",
+    RequestCosignatureAction(
+      action=TicketWorkflowAction.REQUEST_COSIGNATURE,
+      targetUserId=cosigner.id,
+      comment="Please review",
     ),
-    primary,
+    requester,
   )
+  assert ticket.workflow_state == TicketWorkflowState.WAITING_FOR_COSIGNATURE
+  assert ticket.current_responsible_user_id == cosigner.id
 
-  assert ticket.primary_officer_id == primary.id
-  assert ticket.current_responsible_user_id == target.id
-  assert events[-1].event_type == TicketEventType.TICKET_FORWARDED
+  await TicketWorkflowCommandService.cosign_ticket(
+    db,
+    ticket.id,
+    CosignTicketAction(
+      action=TicketWorkflowAction.COSIGN,
+      comment="Cosigned",
+    ),
+    cosigner,
+  )
+  assert ticket.workflow_state == TicketWorkflowState.IN_PROGRESS
+  assert ticket.current_responsible_user_id == requester.id
+  assert [event.event_type for event in staged] == [
+    TicketEventType.COSIGNATURE_REQUESTED,
+    TicketEventType.TICKET_COSIGNED,
+  ]
 
 
 @pytest.mark.asyncio
-async def test_escalation_and_approval_return_to_requester(monkeypatch) -> None:
+async def test_escalation_decision_is_one_command(monkeypatch) -> None:
   db = AsyncMock()
-  officer = _user(Role.OFFICER, office_id=uuid4())
-  manager = _user(Role.MANAGER, office_id=uuid4())
+  requester = _user(Role.OFFICER)
+  manager = _user(Role.MANAGER)
   ticket = _ticket(
     uuid4(),
-    coordinator_id=officer.id,
-    primary_officer_id=officer.id,
+    coordinator_id=manager.id,
+    workflow_state=TicketWorkflowState.WAITING_FOR_DECISION,
+    pending_return_to_user_id=requester.id,
+    version=4,
   )
-  events: list[TicketEvent] = []
+  staged: list[TicketEvent] = []
 
   monkeypatch.setattr(
     "src.ticket.repository.TicketRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.has_open_blocking_work_items",
-    AsyncMock(return_value=False),
-  )
-  monkeypatch.setattr(
     "src.user.repository.UserRepository.get_by_id",
-    AsyncMock(side_effect=[manager, officer]),
+    AsyncMock(return_value=requester),
   )
-  _mock_event_writes(monkeypatch, events)
+  _mock_event_writes(monkeypatch, staged)
 
-  await TicketWorkflowCommandService.escalate_ticket(
+  await TicketWorkflowCommandService.decide_escalation(
     db,
     ticket.id,
-    EscalateTicketAction(
-      action=TicketWorkflowAction.ESCALATE,
-      managerUserId=manager.id,
-      reason="Repair costs exceed the officer's authority",
-    ),
-    officer,
-  )
-
-  assert ticket.workflow_state == TicketWorkflowState.WAITING_FOR_APPROVAL
-  assert ticket.current_responsible_user_id == manager.id
-  assert ticket.pending_return_to_user_id == officer.id
-
-  await TicketWorkflowCommandService.approve_escalation(
-    db,
-    ticket.id,
-    ApproveEscalationAction(
-      action=TicketWorkflowAction.APPROVE_ESCALATION,
-      comment="Budget approved",
+    DecideEscalationAction(
+      action=TicketWorkflowAction.DECIDE_ESCALATION,
+      decision=EscalationDecision.APPROVED,
+      comment="Approved",
     ),
     manager,
   )
 
+  assert ticket.current_responsible_user_id == requester.id
   assert ticket.workflow_state == TicketWorkflowState.IN_PROGRESS
-  assert ticket.current_responsible_user_id == officer.id
-  assert ticket.pending_return_to_user_id is None
-  assert events[-1].event_type == TicketEventType.ESCALATION_APPROVED
-  assert events[-1].citizen_visible is True
+  assert staged[-1].event_type == TicketEventType.ESCALATION_DECIDED
+  assert staged[-1].payload["decision"] == "APPROVED"
 
 
 @pytest.mark.asyncio
-async def test_citizen_response_returns_case_to_requesting_officer(monkeypatch) -> None:
+async def test_only_manager_can_complete_as_rejected(monkeypatch) -> None:
   db = AsyncMock()
-  citizen = _user(Role.CITIZEN)
-  officer = _user(Role.OFFICER, office_id=uuid4())
-  ticket = _ticket(
-    citizen.id,
-    coordinator_id=officer.id,
-    primary_officer_id=officer.id,
-  )
-  events: list[TicketEvent] = []
-
+  officer = _user(Role.OFFICER)
+  ticket = _ticket(uuid4(), coordinator_id=officer.id)
   monkeypatch.setattr(
     "src.ticket.repository.TicketRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
-  )
-  monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.has_open_blocking_work_items",
-    AsyncMock(return_value=False),
-  )
-  monkeypatch.setattr(
-    "src.user.repository.UserRepository.get_by_id",
-    AsyncMock(return_value=officer),
-  )
-  _mock_event_writes(monkeypatch, events)
-
-  await TicketWorkflowCommandService.request_citizen_response(
-    db,
-    ticket.id,
-    RequestCitizenResponseAction(
-      action=TicketWorkflowAction.REQUEST_CITIZEN_RESPONSE,
-      question="Which house number is affected?",
-    ),
-    officer,
-  )
-
-  assert ticket.workflow_state == TicketWorkflowState.WAITING_FOR_CITIZEN
-  assert ticket.current_responsible_user_id == citizen.id
-  assert ticket.pending_return_to_user_id == officer.id
-
-  _, response_event = await TicketWorkflowCommandService.respond_as_citizen(
-    db,
-    ticket.id,
-    TicketCitizenResponseRequest(message="House number 12"),
-    citizen,
-  )
-
-  assert ticket.workflow_state == TicketWorkflowState.IN_PROGRESS
-  assert ticket.current_responsible_user_id == officer.id
-  assert ticket.pending_return_to_user_id is None
-  assert response_event.event_type == TicketEventType.CITIZEN_RESPONDED
-
-
-@pytest.mark.asyncio
-async def test_officer_can_resolve_but_cannot_reject_ticket(monkeypatch) -> None:
-  db = AsyncMock()
-  officer = _user(Role.OFFICER, office_id=uuid4())
-  ticket = _ticket(
-    uuid4(),
-    coordinator_id=officer.id,
-    primary_officer_id=officer.id,
-  )
-  events: list[TicketEvent] = []
-
-  monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_by_id_for_update",
-    AsyncMock(return_value=ticket),
-  )
-  monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.has_open_work_items",
-    AsyncMock(return_value=False),
-  )
-  _mock_event_writes(monkeypatch, events)
-
-  await TicketWorkflowCommandService.resolve_ticket(
-    db,
-    ticket.id,
-    ResolveTicketAction(
-      action=TicketWorkflowAction.RESOLVE,
-      message="Road surface repaired",
-    ),
-    officer,
-  )
-
-  assert ticket.workflow_state == TicketWorkflowState.COMPLETED
-  assert ticket.public_status == TicketStatus.RESOLVED
-
-  another_ticket = _ticket(
-    uuid4(),
-    coordinator_id=officer.id,
-    primary_officer_id=officer.id,
-  )
-  monkeypatch.setattr(
-    "src.ticket.repository.TicketRepository.get_by_id_for_update",
-    AsyncMock(return_value=another_ticket),
   )
 
   with pytest.raises(ForbiddenException):
-    await TicketWorkflowCommandService.reject_ticket(
+    await TicketWorkflowCommandService.complete_ticket(
       db,
-      another_ticket.id,
-      RejectTicketAction(
-        action=TicketWorkflowAction.REJECT_TICKET,
-        message="Not an authority responsibility",
+      ticket.id,
+      CompleteTicketAction(
+        action=TicketWorkflowAction.COMPLETE,
+        outcome=TicketCompletionOutcome.REJECTED,
+        message="Not responsible",
       ),
       officer,
     )

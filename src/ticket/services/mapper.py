@@ -2,33 +2,64 @@
 
 from __future__ import annotations
 
-
-
 from src.address.schemas import AddressResponse
 from src.core.config import settings
 from src.ticket.events import (
+  EscalationDecision,
+  TicketCompletionOutcome,
+  TicketEventType,
+  TicketStatus,
   TicketWorkflowState,
 )
-from src.ticket.models import Ticket, TicketEvent, TicketWorkItem
+from src.ticket.models import Ticket, TicketEvent
 from src.ticket.schemas import (
-  TicketEventResponse, TicketInternalResponse, TicketResponse, TicketStatusResponse,
-  TicketWorkItemResponse,
+  TicketEventResponse,
+  TicketInternalResponse,
+  TicketResponse,
+  TicketStatusResponse,
 )
 from src.user.models import Role, User
 
+
 class TicketResponseMapper:
-  """Builds stable citizen-facing responses without executing queries."""
+  """Build stable public and internal ticket responses without queries."""
 
   @staticmethod
   def to_status(event: TicketEvent | None) -> TicketStatusResponse | None:
-    """Converts a public event into the former Ktor status DTO shape."""
+    """Derive one citizen timeline entry from an internal event."""
 
-    if event is None or event.public_status is None:
+    if event is None:
+      return None
+
+    status: TicketStatus | None = None
+    message: str | None = None
+    payload = event.payload
+
+    if event.event_type == TicketEventType.TICKET_SUBMITTED:
+      status, message = TicketStatus.OPEN, "Ticket submitted"
+    elif event.event_type == TicketEventType.TICKET_DISPATCHED:
+      status, message = TicketStatus.IN_PROGRESS, "Forwarded to the responsible office"
+    elif event.event_type == TicketEventType.CITIZEN_RESPONSE_REQUESTED:
+      status, message = TicketStatus.IN_PROGRESS, payload.get("question")
+    elif event.event_type == TicketEventType.CITIZEN_RESPONDED:
+      status, message = TicketStatus.IN_PROGRESS, "Citizen response received"
+    elif event.event_type == TicketEventType.ESCALATION_DECIDED:
+      if payload.get("decision") == EscalationDecision.APPROVED.value:
+        status = TicketStatus.IN_PROGRESS
+        message = payload.get("comment") or "Proposed measure approved"
+    elif event.event_type == TicketEventType.TICKET_COMPLETED:
+      outcome = TicketCompletionOutcome(payload["outcome"])
+      status = TicketStatus(outcome.value)
+      message = payload.get("message")
+    elif event.event_type == TicketEventType.TICKET_CANCELLED:
+      status, message = TicketStatus.CANCELLED, "Ticket cancelled"
+
+    if status is None:
       return None
     return TicketStatusResponse(
       id=event.id,
-      status=event.public_status,
-      message=event.public_message,
+      status=status,
+      message=message,
       created_by_user_id=event.actor_user_id,
       created_at=event.occurred_at,
     )
@@ -40,7 +71,7 @@ class TicketResponseMapper:
     current_status_event: TicketEvent | None,
     current_user: User | None,
   ) -> TicketResponse:
-    """Builds a stable citizen-facing response without leaking workflow tasks."""
+    """Build a citizen-facing response without exposing workflow internals."""
 
     can_edit = (
       current_user is not None
@@ -54,7 +85,6 @@ class TicketResponseMapper:
       (image for image in active_images if image.is_cover),
       active_images[0] if active_images else None,
     )
-    votes = list(getattr(ticket, "votes", []))
     can_manage_images = can_edit
     if current_user is not None and current_user.role in {Role.OFFICER, Role.MANAGER}:
       can_manage_images = (
@@ -86,12 +116,6 @@ class TicketResponseMapper:
       visibility=ticket.visibility,
       created_at=ticket.created_at,
       current_status=TicketResponseMapper.to_status(current_status_event),
-      votes_count=len(votes),
-      user_voted=(
-        any(vote.user_id == current_user.id for vote in votes)
-        if current_user is not None
-        else None
-      ),
       image_url=(
         f"{settings.BASE_URL}/tickets/{ticket.id}/images/{cover_image.id}/content"
         if cover_image is not None
@@ -109,15 +133,13 @@ class TicketResponseMapper:
     current_status_event: TicketEvent | None,
     current_user: User,
   ) -> TicketInternalResponse:
-    """Builds the staff response while reusing the citizen DTO fields."""
+    """Build the authority response while reusing citizen-facing fields."""
 
     public_response = TicketResponseMapper.to_public_ticket(
       ticket,
       current_status_event=current_status_event,
       current_user=current_user,
     )
-    # Every officer or manager who passed the internal visibility check may add
-    # revisioned evidence while the administrative workflow is still active.
     public_response.can_manage_images = (
       current_user.role in {Role.OFFICER, Role.MANAGER}
       and ticket.workflow_state != TicketWorkflowState.COMPLETED
@@ -132,7 +154,7 @@ class TicketResponseMapper:
 
   @staticmethod
   def to_event(event: TicketEvent) -> TicketEventResponse:
-    """Converts one persisted event into the internal API representation."""
+    """Convert one persisted event into the internal API representation."""
 
     return TicketEventResponse(
       id=event.id,
@@ -142,27 +164,4 @@ class TicketResponseMapper:
       actor_user_id=event.actor_user_id,
       occurred_at=event.occurred_at,
       payload=event.payload,
-      citizen_visible=event.citizen_visible,
-      public_status=event.public_status,
-      public_message=event.public_message,
-    )
-
-  @staticmethod
-  def to_work_item(work_item: TicketWorkItem) -> TicketWorkItemResponse:
-    """Converts a projected parallel task into its API representation."""
-
-    return TicketWorkItemResponse(
-      id=work_item.id,
-      ticket_id=work_item.ticket_id,
-      group_id=work_item.group_id,
-      kind=work_item.kind,
-      status=work_item.status,
-      outcome=work_item.outcome,
-      assignee_user_id=work_item.assignee_user_id,
-      requested_by_user_id=work_item.requested_by_user_id,
-      return_to_user_id=work_item.return_to_user_id,
-      is_blocking=work_item.is_blocking,
-      comment=work_item.comment,
-      created_at=work_item.created_at,
-      completed_at=work_item.completed_at,
     )

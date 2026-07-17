@@ -1,4 +1,4 @@
-"""Community vote and revisioned image projection models."""
+"""Revisioned ticket image projection models."""
 
 from __future__ import annotations
 
@@ -7,47 +7,12 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
   BigInteger, Boolean, CheckConstraint, Column, DateTime, ForeignKey,
-  Index, String, UniqueConstraint, text,
+  Index, String, text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from src.core.database import Base
-
-class TicketVote(Base):
-  """One community vote per user and public ticket."""
-
-  __tablename__ = "ticket_votes"
-  __table_args__ = (
-    UniqueConstraint(
-      "ticket_id",
-      "user_id",
-      name="uq_ticket_votes_ticket_user",
-    ),
-  )
-
-  id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-  ticket_id = Column(
-    UUID(as_uuid=True),
-    ForeignKey("tickets.id", ondelete="CASCADE"),
-    nullable=False,
-    index=True,
-  )
-  user_id = Column(
-    UUID(as_uuid=True),
-    ForeignKey("users.id", ondelete="CASCADE"),
-    nullable=False,
-    index=True,
-  )
-  created_at = Column(
-    DateTime(timezone=True),
-    nullable=False,
-    default=lambda: datetime.now(timezone.utc),
-  )
-
-  ticket = relationship("Ticket", back_populates="votes")
-  user = relationship("User")
-
 
 class TicketImage(Base):
   """Current image projection backed by immutable ticket media events.

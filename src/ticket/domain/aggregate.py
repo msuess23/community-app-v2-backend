@@ -9,16 +9,30 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from src.ticket.domain.enums import (
-  TicketCategory, TicketEventType, TicketStatus, TicketVisibility,
+  EscalationDecision,
+  TicketCategory,
+  TicketEventType,
+  TicketStatus,
+  TicketVisibility,
   TicketWorkflowState,
 )
 from src.ticket.domain.payloads import (
-  AddressSnapshot, CitizenRespondedPayload, CitizenResponseRequestedPayload,
-  EscalationDecisionPayload, PrimaryOfficerAssignedPayload,
-  TicketCompletedPayload, TicketDetailsUpdatedPayload,
-  TicketDispatchedPayload, TicketEscalatedPayload, TicketForwardedPayload,
-  TicketSubmittedPayload, validate_event_payload,
+  AddressSnapshot,
+  CitizenRespondedPayload,
+  CitizenResponseRequestedPayload,
+  CosignatureRequestedPayload,
+  EscalationDecisionPayload,
+  PrimaryOfficerAssignedPayload,
+  TicketCompletedPayload,
+  TicketCosignedPayload,
+  TicketDetailsUpdatedPayload,
+  TicketDispatchedPayload,
+  TicketEscalatedPayload,
+  TicketForwardedPayload,
+  TicketSubmittedPayload,
+  validate_event_payload,
 )
+
 
 class TicketAggregateState(BaseModel):
   """Pure aggregate state rebuilt from the ordered ticket event stream."""
@@ -41,8 +55,9 @@ class TicketAggregateState(BaseModel):
   version: int = 0
   created_at: datetime
   updated_at: datetime
-  resolved_at: datetime | None = None
+  completed_at: datetime | None = None
   cancelled_at: datetime | None = None
+
 
 def evolve_ticket(
   state: TicketAggregateState | None,
@@ -51,12 +66,7 @@ def evolve_ticket(
   *,
   occurred_at: datetime,
 ) -> TicketAggregateState:
-  """Applies one validated event and returns the resulting ticket state.
-
-  The function implements only deterministic state changes.  Authorization and
-  workflow preconditions remain in the service layer because they depend on the
-  current actor and database-backed assignments.
-  """
+  """Apply one validated event and return the resulting aggregate state."""
 
   validated = validate_event_payload(event_type, payload)
 
@@ -90,7 +100,7 @@ def evolve_ticket(
   if event_type == TicketEventType.TICKET_DETAILS_UPDATED:
     updated = validated
     assert isinstance(updated, TicketDetailsUpdatedPayload)
-    # model_fields_set preserves an explicit null used to clear optional fields.
+    # ``model_fields_set`` preserves an explicit null used to clear fields.
     for field_name in updated.model_fields_set:
       setattr(next_state, field_name, getattr(updated, field_name))
   elif event_type == TicketEventType.TICKET_CANCELLED:
@@ -118,6 +128,19 @@ def evolve_ticket(
     assert isinstance(forwarded, TicketForwardedPayload)
     next_state.current_responsible_user_id = forwarded.target_user_id
     next_state.pending_return_to_user_id = None
+    next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
+  elif event_type == TicketEventType.COSIGNATURE_REQUESTED:
+    request = validated
+    assert isinstance(request, CosignatureRequestedPayload)
+    next_state.workflow_state = TicketWorkflowState.WAITING_FOR_COSIGNATURE
+    next_state.current_responsible_user_id = request.target_user_id
+    next_state.pending_return_to_user_id = request.return_to_user_id
+  elif event_type == TicketEventType.TICKET_COSIGNED:
+    cosigned = validated
+    assert isinstance(cosigned, TicketCosignedPayload)
+    next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
+    next_state.current_responsible_user_id = cosigned.return_to_user_id
+    next_state.pending_return_to_user_id = None
   elif event_type == TicketEventType.CITIZEN_RESPONSE_REQUESTED:
     request = validated
     assert isinstance(request, CitizenResponseRequestedPayload)
@@ -135,40 +158,30 @@ def evolve_ticket(
   elif event_type == TicketEventType.TICKET_ESCALATED:
     escalation = validated
     assert isinstance(escalation, TicketEscalatedPayload)
-    next_state.workflow_state = TicketWorkflowState.WAITING_FOR_APPROVAL
+    next_state.workflow_state = TicketWorkflowState.WAITING_FOR_DECISION
     next_state.current_responsible_user_id = escalation.manager_user_id
     next_state.pending_return_to_user_id = escalation.return_to_user_id
-  elif event_type in {
-    TicketEventType.ESCALATION_APPROVED,
-    TicketEventType.ESCALATION_REJECTED,
-  }:
+  elif event_type == TicketEventType.ESCALATION_DECIDED:
     decision = validated
     assert isinstance(decision, EscalationDecisionPayload)
     next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
     next_state.current_responsible_user_id = decision.return_to_user_id
     next_state.pending_return_to_user_id = None
-    if event_type == TicketEventType.ESCALATION_APPROVED:
-      next_state.public_status_message = decision.comment or "Proposed measure approved"
-  elif event_type == TicketEventType.TICKET_RESOLVED:
+    if decision.decision == EscalationDecision.APPROVED:
+      next_state.public_status_message = (
+        decision.comment or "Proposed measure approved"
+      )
+  elif event_type == TicketEventType.TICKET_COMPLETED:
     completed = validated
     assert isinstance(completed, TicketCompletedPayload)
-    next_state.public_status = TicketStatus.RESOLVED
-    next_state.public_status_message = completed.message or "Ticket resolved"
+    next_state.public_status = TicketStatus(completed.outcome.value)
+    next_state.public_status_message = completed.message
     next_state.workflow_state = TicketWorkflowState.COMPLETED
     next_state.current_responsible_user_id = None
     next_state.pending_return_to_user_id = None
-    next_state.resolved_at = occurred_at
-  elif event_type == TicketEventType.TICKET_REJECTED:
-    completed = validated
-    assert isinstance(completed, TicketCompletedPayload)
-    next_state.public_status = TicketStatus.REJECTED
-    next_state.public_status_message = completed.message or "Ticket rejected"
-    next_state.workflow_state = TicketWorkflowState.COMPLETED
-    next_state.current_responsible_user_id = None
-    next_state.pending_return_to_user_id = None
-    next_state.resolved_at = occurred_at
-  # Work-item, comment and image events update their own read models.  They
-  # still advance the aggregate version so the complete stream stays ordered.
+    next_state.completed_at = occurred_at
+  # Comment and image events update separate projections. They still advance
+  # the aggregate version so the full event stream remains strictly ordered.
 
   return next_state
 
@@ -176,16 +189,11 @@ def evolve_ticket(
 def rebuild_ticket(
   events: list[tuple[TicketEventType, dict[str, Any], datetime]],
 ) -> TicketAggregateState:
-  """Rebuilds an aggregate from an already ordered list of persisted events."""
+  """Rebuild an aggregate from an already ordered list of persisted events."""
 
   state: TicketAggregateState | None = None
   for event_type, payload, occurred_at in events:
-    state = evolve_ticket(
-      state,
-      event_type,
-      payload,
-      occurred_at=occurred_at,
-    )
+    state = evolve_ticket(state, event_type, payload, occurred_at=occurred_at)
   if state is None:
     raise ValueError("A ticket aggregate requires at least one event")
   return state

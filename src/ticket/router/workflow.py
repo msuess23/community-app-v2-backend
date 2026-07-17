@@ -14,15 +14,19 @@ from src.core.schemas import PaginatedResponse
 from src.ticket.events import TicketCategory, TicketStatus, TicketWorkflowState
 from src.ticket.models import TicketSortField
 from src.ticket.schemas import (
-  PrimaryOfficerAssignmentRequest, TicketAllowedActionsResponse, TicketDispatchRequest, TicketEventResponse,
+  PrimaryOfficerAssignmentRequest,
+  TicketDispatchRequest,
+  TicketEventResponse,
   TicketInternalDetailResponse,
-  TicketInternalResponse, TicketWorkflowRequest,
+  TicketInternalResponse,
+  TicketWorkflowRequest,
 )
 from src.ticket.workflow_service import TicketWorkflowService
 from src.user.models import Role, User
 
 
 router = APIRouter()
+
 
 @router.get("/work-queue", response_model=PaginatedResponse[TicketInternalResponse])
 async def list_ticket_work_queue(
@@ -39,7 +43,7 @@ async def list_ticket_work_queue(
     role_required(Role.DISPATCHER, Role.OFFICER, Role.MANAGER)
   ),
 ):
-  """Returns the role-scoped queue used by the administrative client."""
+  """Return the role-scoped queue used by the authority client."""
 
   return await TicketWorkflowService.list_work_queue(
     db,
@@ -63,7 +67,7 @@ async def get_internal_ticket(
     role_required(Role.DISPATCHER, Role.OFFICER, Role.MANAGER)
   ),
 ):
-  """Returns workflow fields, parallel tasks and server-computed actions."""
+  """Return workflow fields and the commands currently available."""
 
   return await TicketWorkflowService.get_internal_ticket(db, ticket_id, current_user)
 
@@ -76,25 +80,9 @@ async def get_internal_ticket_events(
     role_required(Role.DISPATCHER, Role.OFFICER, Role.MANAGER)
   ),
 ):
-  """Returns the complete append-only event stream to authorized staff."""
+  """Return the complete append-only event stream to authorized staff."""
 
   return await TicketWorkflowService.get_internal_events(db, ticket_id, current_user)
-
-
-@router.get(
-  "/{ticket_id}/allowed-actions",
-  response_model=TicketAllowedActionsResponse,
-)
-async def get_allowed_ticket_actions(
-  ticket_id: uuid.UUID,
-  db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(
-    role_required(Role.DISPATCHER, Role.OFFICER, Role.MANAGER)
-  ),
-):
-  """Returns the workflow commands currently available to this staff user."""
-
-  return await TicketWorkflowService.get_allowed_actions(db, ticket_id, current_user)
 
 
 @router.post("/{ticket_id}/dispatch", response_model=TicketInternalDetailResponse)
@@ -104,7 +92,7 @@ async def dispatch_ticket(
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(role_required(Role.DISPATCHER)),
 ):
-  """Routes a central-inbox ticket to one active office."""
+  """Route a central-inbox ticket to one active office."""
 
   return await TicketWorkflowService.dispatch_ticket(db, ticket_id, request, current_user)
 
@@ -119,13 +107,10 @@ async def assign_primary_officer(
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(role_required(Role.MANAGER)),
 ):
-  """Assigns the permanent officer after the ticket reaches an office."""
+  """Assign the permanent officer after the ticket reaches an office."""
 
   return await TicketWorkflowService.assign_primary_officer(
-    db,
-    ticket_id,
-    request,
-    current_user,
+    db, ticket_id, request, current_user
   )
 
 
@@ -136,6 +121,8 @@ async def execute_ticket_workflow(
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(role_required(Role.OFFICER, Role.MANAGER)),
 ):
-  """Executes a validated ad-hoc workflow command."""
+  """Execute one validated sequential ad-hoc workflow command."""
 
-  return await TicketWorkflowService.execute_workflow(db, ticket_id, request, current_user)
+  return await TicketWorkflowService.execute_workflow(
+    db, ticket_id, request, current_user
+  )

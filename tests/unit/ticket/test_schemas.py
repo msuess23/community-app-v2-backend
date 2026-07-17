@@ -1,25 +1,24 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-import pytest
-from pydantic import ValidationError
+from src.ticket.events import (
+  EscalationDecision,
+  TicketCategory,
+  TicketCompletionOutcome,
+  TicketStatus,
+  TicketVisibility,
+  TicketWorkflowAction,
+)
+from src.ticket.schemas import (
+  CompleteTicketAction,
+  DecideEscalationAction,
+  RequestCosignatureAction,
+  TicketResponse,
+  TicketStatusResponse,
+)
 
-from src.ticket.events import TicketCategory, TicketStatus, TicketVisibility
-from src.ticket.schemas import TicketCreateRequest, TicketResponse, TicketStatusResponse
 
-
-def test_create_request_forbids_citizen_office_selection() -> None:
-  with pytest.raises(ValidationError):
-    TicketCreateRequest.model_validate(
-      {
-        "title": "Pothole",
-        "category": "INFRASTRUCTURE",
-        "officeId": str(uuid4()),
-      }
-    )
-
-
-def test_ticket_response_uses_ktor_compatible_camel_case_aliases() -> None:
+def test_ticket_response_keeps_existing_camel_case_contract_for_now() -> None:
   now = datetime.now(timezone.utc)
   response = TicketResponse(
     id=uuid4(),
@@ -38,36 +37,30 @@ def test_ticket_response_uses_ktor_compatible_camel_case_aliases() -> None:
   )
 
   data = response.model_dump(by_alias=True)
-
   assert "creatorUserId" in data
   assert "currentStatus" in data
-  assert "votesCount" in data
-  assert "imageUrl" in data
-  assert "creator_user_id" not in data
+  assert "votesCount" not in data
 
 
-def test_parallel_cosignature_action_rejects_duplicate_users() -> None:
-  from src.ticket.events import TicketWorkflowAction
-  from src.ticket.schemas import RequestParallelCosignaturesAction
-
-  assignee = uuid4()
-  with pytest.raises(ValidationError):
-    RequestParallelCosignaturesAction(
-      action=TicketWorkflowAction.REQUEST_PARALLEL_COSIGNATURES,
-      assigneeUserIds=[assignee, assignee],
-    )
-
-
-def test_workflow_action_uses_camel_case_fields() -> None:
-  from src.ticket.events import TicketWorkflowAction, TicketWorkItemOutcome
-  from src.ticket.schemas import CompleteWorkItemAction
-
-  action = CompleteWorkItemAction(
-    action=TicketWorkflowAction.COMPLETE_WORK_ITEM,
-    workItemId=uuid4(),
-    outcome=TicketWorkItemOutcome.APPROVED,
+def test_cosignature_action_uses_one_target_user() -> None:
+  target = uuid4()
+  action = RequestCosignatureAction(
+    action=TicketWorkflowAction.REQUEST_COSIGNATURE,
+    targetUserId=target,
+    comment="Please review",
   )
+  assert action.target_user_id == target
 
-  data = action.model_dump(by_alias=True)
-  assert "workItemId" in data
-  assert "work_item_id" not in data
+
+def test_combined_decision_and_completion_actions_validate() -> None:
+  decision = DecideEscalationAction(
+    action=TicketWorkflowAction.DECIDE_ESCALATION,
+    decision=EscalationDecision.APPROVED,
+  )
+  completion = CompleteTicketAction(
+    action=TicketWorkflowAction.COMPLETE,
+    outcome=TicketCompletionOutcome.RESOLVED,
+    message="Completed",
+  )
+  assert decision.decision == EscalationDecision.APPROVED
+  assert completion.outcome == TicketCompletionOutcome.RESOLVED

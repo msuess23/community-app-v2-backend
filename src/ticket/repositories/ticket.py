@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, Tuple
 
-from sqlalchemy import exists, func, or_
+from sqlalchemy import func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -15,9 +15,9 @@ from src.address.models import Address
 from src.core.filters import SortOrder, apply_bbox_filter, apply_search_filter
 from src.ticket.events import (
   TicketCategory, TicketStatus, TicketVisibility,
-  TicketWorkflowState, TicketWorkItemStatus,
+  TicketWorkflowState,
 )
-from src.ticket.models import Ticket, TicketSortField, TicketWorkItem
+from src.ticket.models import Ticket, TicketSortField
 from src.user.models import Role, User
 
 class TicketProjectionRepository:
@@ -44,7 +44,6 @@ class TicketProjectionRepository:
       select(Ticket)
       .options(
         selectinload(Ticket.address),
-        selectinload(Ticket.votes),
         selectinload(Ticket.images),
       )
       .where(Ticket.id == ticket_id)
@@ -62,7 +61,6 @@ class TicketProjectionRepository:
       select(Ticket)
       .options(
         selectinload(Ticket.address),
-        selectinload(Ticket.votes),
         selectinload(Ticket.images),
       )
       .where(Ticket.id == ticket_id)
@@ -92,7 +90,6 @@ class TicketProjectionRepository:
       select(Ticket)
       .options(
         selectinload(Ticket.address),
-        selectinload(Ticket.votes),
         selectinload(Ticket.images),
       )
       .where(Ticket.visibility == TicketVisibility.PUBLIC)
@@ -143,7 +140,6 @@ class TicketProjectionRepository:
       select(Ticket)
       .options(
         selectinload(Ticket.address),
-        selectinload(Ticket.votes),
         selectinload(Ticket.images),
       )
       .where(Ticket.creator_user_id == creator_user_id)
@@ -186,17 +182,8 @@ class TicketProjectionRepository:
     tickets they own, coordinate, or have an open parallel task for.
     """
 
-    open_task_for_user = exists(
-      select(TicketWorkItem.id).where(
-        TicketWorkItem.ticket_id == Ticket.id,
-        TicketWorkItem.assignee_user_id == current_user.id,
-        TicketWorkItem.status == TicketWorkItemStatus.OPEN,
-      )
-    )
-
     query = select(Ticket).options(
         selectinload(Ticket.address),
-        selectinload(Ticket.votes),
         selectinload(Ticket.images),
       )
     if current_user.role == Role.DISPATCHER:
@@ -215,7 +202,6 @@ class TicketProjectionRepository:
           Ticket.office_id == current_user.office_id,
           Ticket.primary_officer_id == current_user.id,
           Ticket.current_responsible_user_id == current_user.id,
-          open_task_for_user,
         ),
       )
     elif current_user.role == Role.OFFICER:
@@ -224,7 +210,6 @@ class TicketProjectionRepository:
         or_(
           Ticket.primary_officer_id == current_user.id,
           Ticket.current_responsible_user_id == current_user.id,
-          open_task_for_user,
         ),
       )
     else:

@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, TypeAlias
+from typing import Any, TypeAlias
 from uuid import UUID
 
-from pydantic import BaseModel, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, TypeAdapter
 
 from src.ticket.domain.enums import (
-  TicketCategory, TicketEventType, TicketVisibility, TicketWorkItemKind,
-  TicketWorkItemOutcome,
+  EscalationDecision,
+  TicketCategory,
+  TicketCompletionOutcome,
+  TicketEventType,
+  TicketVisibility,
 )
+
 
 class AddressSnapshot(BaseModel):
   """Immutable address value embedded in ticket event payloads."""
@@ -65,53 +69,25 @@ class PrimaryOfficerAssignedPayload(BaseModel):
 
 
 class TicketForwardedPayload(BaseModel):
-  """Moves overall coordination to another employee without changing ownership."""
+  """Moves overall coordination without changing permanent ownership."""
 
   target_user_id: UUID
   comment: str | None = None
 
 
-class ParallelWorkItemRequest(BaseModel):
-  """One task in a small parallel review group."""
+class CosignatureRequestedPayload(BaseModel):
+  """Temporarily sends the ticket to one employee for sequential cosigning."""
 
-  assignee_user_id: UUID
-  kind: TicketWorkItemKind
-  comment: str | None = None
-  is_blocking: bool = True
-
-
-class ParallelWorkItemsRequestedPayload(BaseModel):
-  """Creates one or more tasks that may be processed concurrently."""
-
-  group_id: UUID
+  target_user_id: UUID
   return_to_user_id: UUID
-  items: Annotated[list[ParallelWorkItemRequest], Field(min_length=1, max_length=10)]
-
-  @field_validator("items")
-  @classmethod
-  def prevent_duplicate_assignees(
-    cls,
-    items: list[ParallelWorkItemRequest],
-  ) -> list[ParallelWorkItemRequest]:
-    assignees = [item.assignee_user_id for item in items]
-    if len(assignees) != len(set(assignees)):
-      raise ValueError("parallel work items must use distinct assignees")
-    return items
-
-
-class WorkItemCompletedPayload(BaseModel):
-  """Completes a single projected task without closing sibling tasks."""
-
-  work_item_id: UUID
-  outcome: TicketWorkItemOutcome
   comment: str | None = None
 
 
-class WorkItemCancelledPayload(BaseModel):
-  """Cancels one no-longer-required projected workflow task."""
+class TicketCosignedPayload(BaseModel):
+  """Records a cosignature and returns the ticket to its requester."""
 
-  work_item_id: UUID
-  reason: str | None = None
+  return_to_user_id: UUID
+  comment: str | None = None
 
 
 class CitizenResponseRequestedPayload(BaseModel):
@@ -137,16 +113,18 @@ class TicketEscalatedPayload(BaseModel):
 
 
 class EscalationDecisionPayload(BaseModel):
-  """Records an approval decision and the employee receiving the case back."""
+  """Stores one management decision and the employee receiving the case back."""
 
   return_to_user_id: UUID
+  decision: EscalationDecision
   comment: str | None = None
 
 
 class TicketCompletedPayload(BaseModel):
-  """Explanation exposed with a final resolved or rejected status."""
+  """Stores the terminal outcome and citizen-facing explanation."""
 
-  message: str | None = None
+  outcome: TicketCompletionOutcome
+  message: str
 
 
 class TicketCommentedPayload(BaseModel):
@@ -187,9 +165,8 @@ EventPayload: TypeAlias = (
   | TicketDispatchedPayload
   | PrimaryOfficerAssignedPayload
   | TicketForwardedPayload
-  | ParallelWorkItemsRequestedPayload
-  | WorkItemCompletedPayload
-  | WorkItemCancelledPayload
+  | CosignatureRequestedPayload
+  | TicketCosignedPayload
   | CitizenResponseRequestedPayload
   | CitizenRespondedPayload
   | TicketEscalatedPayload
@@ -209,16 +186,13 @@ _EVENT_PAYLOAD_TYPES: dict[TicketEventType, type[BaseModel]] = {
   TicketEventType.TICKET_DISPATCHED: TicketDispatchedPayload,
   TicketEventType.PRIMARY_OFFICER_ASSIGNED: PrimaryOfficerAssignedPayload,
   TicketEventType.TICKET_FORWARDED: TicketForwardedPayload,
-  TicketEventType.PARALLEL_WORK_ITEMS_REQUESTED: ParallelWorkItemsRequestedPayload,
-  TicketEventType.WORK_ITEM_COMPLETED: WorkItemCompletedPayload,
-  TicketEventType.WORK_ITEM_CANCELLED: WorkItemCancelledPayload,
+  TicketEventType.COSIGNATURE_REQUESTED: CosignatureRequestedPayload,
+  TicketEventType.TICKET_COSIGNED: TicketCosignedPayload,
   TicketEventType.CITIZEN_RESPONSE_REQUESTED: CitizenResponseRequestedPayload,
   TicketEventType.CITIZEN_RESPONDED: CitizenRespondedPayload,
   TicketEventType.TICKET_ESCALATED: TicketEscalatedPayload,
-  TicketEventType.ESCALATION_APPROVED: EscalationDecisionPayload,
-  TicketEventType.ESCALATION_REJECTED: EscalationDecisionPayload,
-  TicketEventType.TICKET_RESOLVED: TicketCompletedPayload,
-  TicketEventType.TICKET_REJECTED: TicketCompletedPayload,
+  TicketEventType.ESCALATION_DECIDED: EscalationDecisionPayload,
+  TicketEventType.TICKET_COMPLETED: TicketCompletedPayload,
   TicketEventType.TICKET_COMMENTED: TicketCommentedPayload,
   TicketEventType.TICKET_IMAGE_ADDED: TicketImageAddedPayload,
   TicketEventType.TICKET_IMAGE_REMOVED: TicketImageRemovedPayload,

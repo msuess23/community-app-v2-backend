@@ -1,4 +1,4 @@
-"""Comment, vote and image API schemas."""
+"""Comment and image API schemas."""
 
 from __future__ import annotations
 
@@ -30,14 +30,6 @@ class TicketCommentResponse(TicketApiModel):
   is_internal: bool
   author_user_id: UUID
   created_at: datetime
-
-
-class TicketVoteResponse(TicketApiModel):
-  """Community vote summary compatible with the former Ktor endpoints."""
-
-  ticket_id: UUID
-  votes_count: int
-  user_voted: bool | None = None
 
 
 class TicketImageResponse(TicketApiModel):

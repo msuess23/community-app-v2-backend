@@ -35,7 +35,6 @@ def _ticket(citizen: User, state: TicketWorkflowState) -> Ticket:
     category=TicketCategory.INFRASTRUCTURE,
     creator_user_id=citizen.id,
     workflow_state=state,
-    votes=[],
     images=[],
   )
 
@@ -97,7 +96,6 @@ async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) 
     actor_user_id=citizen.id,
     occurred_at=datetime.now(timezone.utc),
     payload={},
-    citizen_visible=False,
   )
   staged: list[TicketImage] = []
 

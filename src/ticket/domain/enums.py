@@ -2,6 +2,7 @@
 
 import enum
 
+
 class TicketCategory(str, enum.Enum):
   """Categories retained from the previous Ktor ticket API."""
 
@@ -30,18 +31,33 @@ class TicketStatus(str, enum.Enum):
 
 
 class TicketWorkflowState(str, enum.Enum):
-  """Internal workflow state used by the administrative client."""
+  """Small internal state set supporting the sequential ad-hoc workflow."""
 
   NEW = "NEW"
   AWAITING_PRIMARY_ASSIGNMENT = "AWAITING_PRIMARY_ASSIGNMENT"
   IN_PROGRESS = "IN_PROGRESS"
+  WAITING_FOR_COSIGNATURE = "WAITING_FOR_COSIGNATURE"
   WAITING_FOR_CITIZEN = "WAITING_FOR_CITIZEN"
-  WAITING_FOR_APPROVAL = "WAITING_FOR_APPROVAL"
+  WAITING_FOR_DECISION = "WAITING_FOR_DECISION"
   COMPLETED = "COMPLETED"
 
 
+class EscalationDecision(str, enum.Enum):
+  """Possible decisions for a pending management escalation."""
+
+  APPROVED = "APPROVED"
+  REJECTED = "REJECTED"
+
+
+class TicketCompletionOutcome(str, enum.Enum):
+  """Terminal outcomes exposed through the public ticket status."""
+
+  RESOLVED = "RESOLVED"
+  REJECTED = "REJECTED"
+
+
 class TicketEventType(str, enum.Enum):
-  """All event types anticipated by the first workflow iteration."""
+  """Events kept in the simplified append-only ticket stream."""
 
   TICKET_SUBMITTED = "TICKET_SUBMITTED"
   TICKET_DETAILS_UPDATED = "TICKET_DETAILS_UPDATED"
@@ -49,58 +65,28 @@ class TicketEventType(str, enum.Enum):
   TICKET_DISPATCHED = "TICKET_DISPATCHED"
   PRIMARY_OFFICER_ASSIGNED = "PRIMARY_OFFICER_ASSIGNED"
   TICKET_FORWARDED = "TICKET_FORWARDED"
-  PARALLEL_WORK_ITEMS_REQUESTED = "PARALLEL_WORK_ITEMS_REQUESTED"
-  WORK_ITEM_COMPLETED = "WORK_ITEM_COMPLETED"
-  WORK_ITEM_CANCELLED = "WORK_ITEM_CANCELLED"
+  COSIGNATURE_REQUESTED = "COSIGNATURE_REQUESTED"
+  TICKET_COSIGNED = "TICKET_COSIGNED"
   CITIZEN_RESPONSE_REQUESTED = "CITIZEN_RESPONSE_REQUESTED"
   CITIZEN_RESPONDED = "CITIZEN_RESPONDED"
   TICKET_ESCALATED = "TICKET_ESCALATED"
-  ESCALATION_APPROVED = "ESCALATION_APPROVED"
-  ESCALATION_REJECTED = "ESCALATION_REJECTED"
-  TICKET_RESOLVED = "TICKET_RESOLVED"
-  TICKET_REJECTED = "TICKET_REJECTED"
+  ESCALATION_DECIDED = "ESCALATION_DECIDED"
+  TICKET_COMPLETED = "TICKET_COMPLETED"
   TICKET_COMMENTED = "TICKET_COMMENTED"
   TICKET_IMAGE_ADDED = "TICKET_IMAGE_ADDED"
   TICKET_IMAGE_REMOVED = "TICKET_IMAGE_REMOVED"
   TICKET_COVER_IMAGE_CHANGED = "TICKET_COVER_IMAGE_CHANGED"
 
 
-class TicketWorkItemKind(str, enum.Enum):
-  """A small set of parallel subtasks supported by the workflow."""
-
-  COSIGNATURE = "COSIGNATURE"
-  CONSULTATION = "CONSULTATION"
-  APPROVAL = "APPROVAL"
-
-
-class TicketWorkItemStatus(str, enum.Enum):
-  """Lifecycle of a projected workflow work item."""
-
-  OPEN = "OPEN"
-  COMPLETED = "COMPLETED"
-  CANCELLED = "CANCELLED"
-
-
-class TicketWorkItemOutcome(str, enum.Enum):
-  """Possible results of a completed review task."""
-
-  APPROVED = "APPROVED"
-  REJECTED = "REJECTED"
-  ACKNOWLEDGED = "ACKNOWLEDGED"
-
-
 class TicketWorkflowAction(str, enum.Enum):
-  """Workflow commands currently exposed by the administrative API."""
+  """Commands exposed by the simplified authority-side workflow."""
 
   DISPATCH = "DISPATCH"
   ASSIGN_PRIMARY_OFFICER = "ASSIGN_PRIMARY_OFFICER"
-  REQUEST_PARALLEL_COSIGNATURES = "REQUEST_PARALLEL_COSIGNATURES"
-  COMPLETE_WORK_ITEM = "COMPLETE_WORK_ITEM"
-  CANCEL_WORK_ITEM = "CANCEL_WORK_ITEM"
   FORWARD = "FORWARD"
+  REQUEST_COSIGNATURE = "REQUEST_COSIGNATURE"
+  COSIGN = "COSIGN"
   ESCALATE = "ESCALATE"
-  APPROVE_ESCALATION = "APPROVE_ESCALATION"
-  REJECT_ESCALATION = "REJECT_ESCALATION"
+  DECIDE_ESCALATION = "DECIDE_ESCALATION"
   REQUEST_CITIZEN_RESPONSE = "REQUEST_CITIZEN_RESPONSE"
-  RESOLVE = "RESOLVE"
-  REJECT_TICKET = "REJECT_TICKET"
+  COMPLETE = "COMPLETE"

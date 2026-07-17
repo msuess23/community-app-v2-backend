@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-  Boolean, Column, DateTime, Enum, ForeignKey,
+  Column, DateTime, Enum, ForeignKey,
   Integer, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -112,7 +112,7 @@ class Ticket(Base):
     default=lambda: datetime.now(timezone.utc),
     onupdate=lambda: datetime.now(timezone.utc),
   )
-  resolved_at = Column(DateTime(timezone=True), nullable=True)
+  completed_at = Column(DateTime(timezone=True), nullable=True)
   cancelled_at = Column(DateTime(timezone=True), nullable=True)
 
   creator = relationship("User", foreign_keys=[creator_user_id], lazy="selectin")
@@ -137,17 +137,6 @@ class Ticket(Base):
     back_populates="ticket",
     order_by="TicketEvent.sequence_number",
     cascade="all, delete-orphan",
-  )
-  work_items = relationship(
-    "TicketWorkItem",
-    back_populates="ticket",
-    cascade="all, delete-orphan",
-  )
-  votes = relationship(
-    "TicketVote",
-    back_populates="ticket",
-    cascade="all, delete-orphan",
-    lazy="selectin",
   )
   images = relationship(
     "TicketImage",
@@ -194,12 +183,5 @@ class TicketEvent(Base):
     default=lambda: datetime.now(timezone.utc),
   )
   payload = Column(JSONB, nullable=False, default=dict)
-  citizen_visible = Column(Boolean, nullable=False, default=False)
-  public_status = Column(
-    Enum(TicketStatus, native_enum=False, length=32),
-    nullable=True,
-  )
-  public_message = Column(String(500), nullable=True)
-
   ticket = relationship("Ticket", back_populates="events")
   actor = relationship("User", foreign_keys=[actor_user_id])

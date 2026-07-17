@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.ticket.events import (
-  TicketVisibility,
-)
+from src.ticket.events import TicketVisibility
 from src.ticket.models import Ticket
-from src.ticket.repository import TicketRepository
 from src.user.models import Role, User
+
 
 STAFF_ROLES = {Role.OFFICER, Role.MANAGER}
 
 
 class TicketAccessPolicy:
-  """Evaluates citizen, public and authority-side ticket permissions."""
+  """Evaluate public, citizen and authority-side ticket permissions."""
 
   @staticmethod
   async def can_view(
@@ -24,8 +21,9 @@ class TicketAccessPolicy:
     ticket: Ticket,
     current_user: User | None,
   ) -> bool:
-    """Checks public, creator and authority-side access to one ticket."""
+    """Check whether a caller may see the public ticket representation."""
 
+    del db
     if ticket.visibility == TicketVisibility.PUBLIC:
       return True
     if current_user is None:
@@ -34,18 +32,18 @@ class TicketAccessPolicy:
       return True
     if current_user.role == Role.DISPATCHER:
       return True
-    if current_user.role in {Role.OFFICER, Role.MANAGER}:
-      if current_user.id in {
-        ticket.primary_officer_id,
-        ticket.current_responsible_user_id,
-      }:
-        return True
-      if current_user.office_id is not None and current_user.office_id == ticket.office_id:
-        return True
-      return await TicketRepository.has_open_work_item_for_user(
-        db,
-        ticket.id,
-        current_user.id,
+    if current_user.role in STAFF_ROLES:
+      return (
+        current_user.id
+        in {
+          ticket.primary_officer_id,
+          ticket.current_responsible_user_id,
+          ticket.pending_return_to_user_id,
+        }
+        or (
+          current_user.office_id is not None
+          and current_user.office_id == ticket.office_id
+        )
       )
     return False
 
@@ -55,22 +53,22 @@ class TicketAccessPolicy:
     ticket: Ticket,
     current_user: User,
   ) -> bool:
-    """Checks access to internal workflow data without granting admin access."""
+    """Check access to internal workflow data without granting admin access."""
 
+    del db
     if current_user.role == Role.DISPATCHER:
       return True
     if current_user.role not in STAFF_ROLES:
       return False
-    if current_user.id in {
-      ticket.primary_officer_id,
-      ticket.current_responsible_user_id,
-      ticket.pending_return_to_user_id,
-    }:
-      return True
-    if current_user.office_id is not None and current_user.office_id == ticket.office_id:
-      return True
-    return await TicketRepository.has_open_work_item_for_user(
-      db,
-      ticket.id,
-      current_user.id,
+    return (
+      current_user.id
+      in {
+        ticket.primary_officer_id,
+        ticket.current_responsible_user_id,
+        ticket.pending_return_to_user_id,
+      }
+      or (
+        current_user.office_id is not None
+        and current_user.office_id == ticket.office_id
+      )
     )

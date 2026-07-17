@@ -1,9 +1,4 @@
-"""Main-path commands for the ticket ad-hoc workflow.
-
-This module contains commands that transfer overall responsibility, wait for an
-external decision, or complete the aggregate. Parallel task commands stay in
-``workflow_service.py`` because they update the separate work-item projection.
-"""
+"""Commands for the simplified sequential ticket ad-hoc workflow."""
 
 from __future__ import annotations
 
@@ -11,30 +6,28 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import (
-  ForbiddenException,
-  WorkflowValidationException,
-)
+from src.core.exceptions import ForbiddenException, WorkflowValidationException
 from src.ticket.events import (
   CitizenRespondedPayload,
   CitizenResponseRequestedPayload,
+  CosignatureRequestedPayload,
   EscalationDecisionPayload,
   TicketCompletedPayload,
+  TicketCosignedPayload,
   TicketEscalatedPayload,
   TicketEventType,
   TicketForwardedPayload,
   TicketWorkflowState,
 )
 from src.ticket.models import Ticket, TicketEvent
-from src.ticket.repository import TicketRepository
 from src.ticket.schemas import (
-  ApproveEscalationAction,
+  CompleteTicketAction,
+  CosignTicketAction,
+  DecideEscalationAction,
   EscalateTicketAction,
   ForwardTicketAction,
-  RejectEscalationAction,
-  RejectTicketAction,
   RequestCitizenResponseAction,
-  ResolveTicketAction,
+  RequestCosignatureAction,
   TicketCitizenResponseRequest,
 )
 from src.ticket.services.event_store import TicketEventStore
@@ -43,13 +36,12 @@ from src.ticket.services.workflow.rules import (
   require_active_processing,
   require_active_staff,
   require_current_coordinator,
-  require_no_blocking_tasks,
 )
 from src.user.models import Role, User
 
 
 class TicketWorkflowCommandService:
-  """Applies validated commands that change the ticket's main workflow path."""
+  """Apply commands that move the ticket through its sequential workflow."""
 
   @staticmethod
   async def forward_ticket(
@@ -58,13 +50,11 @@ class TicketWorkflowCommandService:
     request: ForwardTicketAction,
     current_user: User,
   ) -> Ticket:
-    """Transfers current coordination while retaining the primary officer."""
+    """Transfer coordination while retaining the permanent primary officer."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     require_current_coordinator(ticket, current_user)
-    require_active_processing(ticket, "Only actively processed tickets may be forwarded.")
-    await require_no_blocking_tasks(db, ticket)
-
+    require_active_processing(ticket, "Only active tickets may be forwarded.")
     target = await require_active_staff(db, request.target_user_id)
     if target.id == current_user.id:
       raise WorkflowValidationException("A ticket cannot be forwarded to the same user.")
@@ -82,19 +72,75 @@ class TicketWorkflowCommandService:
     return ticket
 
   @staticmethod
+  async def request_cosignature(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    request: RequestCosignatureAction,
+    current_user: User,
+  ) -> Ticket:
+    """Send the ticket to one employee for an explicit cosignature."""
+
+    ticket = await require_ticket(db, ticket_id, for_update=True)
+    require_current_coordinator(ticket, current_user)
+    require_active_processing(ticket, "Cosignatures require active processing.")
+    target = await require_active_staff(db, request.target_user_id)
+    if target.id == current_user.id:
+      raise WorkflowValidationException("A user cannot request their own cosignature.")
+
+    await TicketEventStore._append_event(
+      db,
+      ticket,
+      actor_user_id=current_user.id,
+      event_type=TicketEventType.COSIGNATURE_REQUESTED,
+      payload=CosignatureRequestedPayload(
+        target_user_id=target.id,
+        return_to_user_id=current_user.id,
+        comment=request.comment,
+      ),
+    )
+    return ticket
+
+  @staticmethod
+  async def cosign_ticket(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    request: CosignTicketAction,
+    current_user: User,
+  ) -> Ticket:
+    """Record the requested cosignature and return the case to its requester."""
+
+    ticket = await require_ticket(db, ticket_id, for_update=True)
+    if (
+      ticket.workflow_state != TicketWorkflowState.WAITING_FOR_COSIGNATURE
+      or ticket.current_responsible_user_id != current_user.id
+      or ticket.pending_return_to_user_id is None
+    ):
+      raise WorkflowValidationException("This ticket is not awaiting your cosignature.")
+    return_to = await require_active_staff(db, ticket.pending_return_to_user_id)
+    await TicketEventStore._append_event(
+      db,
+      ticket,
+      actor_user_id=current_user.id,
+      event_type=TicketEventType.TICKET_COSIGNED,
+      payload=TicketCosignedPayload(
+        return_to_user_id=return_to.id,
+        comment=request.comment,
+      ),
+    )
+    return ticket
+
+  @staticmethod
   async def escalate_ticket(
     db: AsyncSession,
     ticket_id: uuid.UUID,
     request: EscalateTicketAction,
     current_user: User,
   ) -> Ticket:
-    """Temporarily transfers coordination to a manager for a decision."""
+    """Temporarily transfer coordination to a manager for one decision."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     require_current_coordinator(ticket, current_user)
-    require_active_processing(ticket, "Only actively processed tickets may be escalated.")
-    await require_no_blocking_tasks(db, ticket)
-
+    require_active_processing(ticket, "Only active tickets may be escalated.")
     manager = await require_active_staff(
       db,
       request.manager_user_id,
@@ -118,73 +164,34 @@ class TicketWorkflowCommandService:
     return ticket
 
   @staticmethod
-  async def approve_escalation(
+  async def decide_escalation(
     db: AsyncSession,
     ticket_id: uuid.UUID,
-    request: ApproveEscalationAction,
+    request: DecideEscalationAction,
     current_user: User,
   ) -> Ticket:
-    """Approves a pending escalation and returns it to the requesting employee."""
-
-    return await TicketWorkflowCommandService._decide_escalation(
-      db,
-      ticket_id,
-      current_user=current_user,
-      event_type=TicketEventType.ESCALATION_APPROVED,
-      comment=request.comment,
-    )
-
-  @staticmethod
-  async def reject_escalation(
-    db: AsyncSession,
-    ticket_id: uuid.UUID,
-    request: RejectEscalationAction,
-    current_user: User,
-  ) -> Ticket:
-    """Rejects an escalation without rejecting the underlying citizen ticket."""
-
-    return await TicketWorkflowCommandService._decide_escalation(
-      db,
-      ticket_id,
-      current_user=current_user,
-      event_type=TicketEventType.ESCALATION_REJECTED,
-      comment=request.comment,
-    )
-
-  @staticmethod
-  async def _decide_escalation(
-    db: AsyncSession,
-    ticket_id: uuid.UUID,
-    *,
-    current_user: User,
-    event_type: TicketEventType,
-    comment: str | None,
-  ) -> Ticket:
-    """Applies one decision to the currently pending manager escalation."""
+    """Apply one management decision and return the ticket to its requester."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     if current_user.role != Role.MANAGER:
       raise ForbiddenException("Only managers may decide escalations")
     if (
-      ticket.workflow_state != TicketWorkflowState.WAITING_FOR_APPROVAL
+      ticket.workflow_state != TicketWorkflowState.WAITING_FOR_DECISION
       or ticket.current_responsible_user_id != current_user.id
       or ticket.pending_return_to_user_id is None
     ):
       raise WorkflowValidationException("This ticket has no escalation for this manager.")
+    return_to = await require_active_staff(db, ticket.pending_return_to_user_id)
 
-    return_to = await require_active_staff(
-      db,
-      ticket.pending_return_to_user_id,
-      error_message="The employee awaiting the decision is no longer active.",
-    )
     await TicketEventStore._append_event(
       db,
       ticket,
       actor_user_id=current_user.id,
-      event_type=event_type,
+      event_type=TicketEventType.ESCALATION_DECIDED,
       payload=EscalationDecisionPayload(
         return_to_user_id=return_to.id,
-        comment=comment,
+        decision=request.decision,
+        comment=request.comment,
       ),
     )
     return ticket
@@ -196,16 +203,11 @@ class TicketWorkflowCommandService:
     request: RequestCitizenResponseAction,
     current_user: User,
   ) -> Ticket:
-    """Pauses authority processing until the citizen supplies missing details."""
+    """Pause authority processing until the citizen supplies missing details."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     require_current_coordinator(ticket, current_user)
-    require_active_processing(
-      ticket,
-      "Citizen information can only be requested during active processing.",
-    )
-    await require_no_blocking_tasks(db, ticket)
-
+    require_active_processing(ticket, "Citizen input requires active processing.")
     await TicketEventStore._append_event(
       db,
       ticket,
@@ -225,7 +227,7 @@ class TicketWorkflowCommandService:
     request: TicketCitizenResponseRequest,
     current_user: User,
   ) -> tuple[Ticket, TicketEvent]:
-    """Appends the creator's response and returns the case to the requester."""
+    """Append the creator response and return the case to the requester."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     if current_user.role != Role.CITIZEN or ticket.creator_user_id != current_user.id:
@@ -236,12 +238,7 @@ class TicketWorkflowCommandService:
       or ticket.pending_return_to_user_id is None
     ):
       raise WorkflowValidationException("This ticket is not waiting for a citizen response.")
-
-    return_to = await require_active_staff(
-      db,
-      ticket.pending_return_to_user_id,
-      error_message="The requesting employee is no longer active.",
-    )
+    return_to = await require_active_staff(db, ticket.pending_return_to_user_id)
     event = await TicketEventStore._append_event(
       db,
       ticket,
@@ -255,68 +252,28 @@ class TicketWorkflowCommandService:
     return ticket, event
 
   @staticmethod
-  async def resolve_ticket(
+  async def complete_ticket(
     db: AsyncSession,
     ticket_id: uuid.UUID,
-    request: ResolveTicketAction,
+    request: CompleteTicketAction,
     current_user: User,
   ) -> Ticket:
-    """Completes an actively processed ticket successfully."""
-
-    return await TicketWorkflowCommandService._complete_ticket(
-      db,
-      ticket_id,
-      current_user=current_user,
-      event_type=TicketEventType.TICKET_RESOLVED,
-      message=request.message,
-      manager_only=False,
-    )
-
-  @staticmethod
-  async def reject_ticket(
-    db: AsyncSession,
-    ticket_id: uuid.UUID,
-    request: RejectTicketAction,
-    current_user: User,
-  ) -> Ticket:
-    """Ends an actively processed ticket as rejected."""
-
-    return await TicketWorkflowCommandService._complete_ticket(
-      db,
-      ticket_id,
-      current_user=current_user,
-      event_type=TicketEventType.TICKET_REJECTED,
-      message=request.message,
-      manager_only=True,
-    )
-
-  @staticmethod
-  async def _complete_ticket(
-    db: AsyncSession,
-    ticket_id: uuid.UUID,
-    *,
-    current_user: User,
-    event_type: TicketEventType,
-    message: str,
-    manager_only: bool,
-  ) -> Ticket:
-    """Applies one terminal event after all active work items are finished."""
+    """Complete a ticket with the requested public outcome."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     require_current_coordinator(ticket, current_user)
-    if manager_only and current_user.role != Role.MANAGER:
+    require_active_processing(ticket, "Only active tickets may be completed.")
+    if request.outcome.value == "REJECTED" and current_user.role != Role.MANAGER:
       raise ForbiddenException("Only managers may reject a ticket")
-    require_active_processing(ticket, "Only actively processed tickets may be completed.")
-    if await TicketRepository.has_open_work_items(db, ticket.id):
-      raise WorkflowValidationException(
-        "Complete or cancel all work items before completing the ticket."
-      )
 
     await TicketEventStore._append_event(
       db,
       ticket,
       actor_user_id=current_user.id,
-      event_type=event_type,
-      payload=TicketCompletedPayload(message=message),
+      event_type=TicketEventType.TICKET_COMPLETED,
+      payload=TicketCompletedPayload(
+        outcome=request.outcome,
+        message=request.message,
+      ),
     )
     return ticket

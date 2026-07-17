@@ -98,7 +98,6 @@ async def test_external_comment_is_append_only_and_citizen_visible(monkeypatch) 
   assert response.text == "The damage became larger"
   assert response.is_internal is False
   assert staged_events[-1].event_type == TicketEventType.TICKET_COMMENTED
-  assert staged_events[-1].citizen_visible is True
   assert ticket.version == 4
 
 
@@ -115,7 +114,6 @@ async def test_public_comment_list_filters_internal_staff_notes(monkeypatch) -> 
     actor_user_id=citizen.id,
     occurred_at=now,
     payload={"text": "Public update", "is_internal": False},
-    citizen_visible=True,
   )
   internal_event = TicketEvent(
     id=uuid4(),
@@ -125,7 +123,6 @@ async def test_public_comment_list_filters_internal_staff_notes(monkeypatch) -> 
     actor_user_id=uuid4(),
     occurred_at=now,
     payload={"text": "Internal note", "is_internal": True},
-    citizen_visible=False,
   )
 
   monkeypatch.setattr(

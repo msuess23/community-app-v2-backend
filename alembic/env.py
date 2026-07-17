@@ -11,11 +11,11 @@ from alembic import context
 from src.core.database import Base
 from src.core.config import settings
 
-from src.user.models import User, UserHistory
-from src.office.models import Office, OfficeHistory
-from src.auth.models import PasswordReset, RefreshToken
-from src.address.models import Address
-from src.ticket.models import Ticket, TicketEvent, TicketWorkItem
+import src.address.models  # noqa: F401
+import src.auth.models  # noqa: F401
+import src.office.models  # noqa: F401
+import src.ticket.models  # noqa: F401
+import src.user.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

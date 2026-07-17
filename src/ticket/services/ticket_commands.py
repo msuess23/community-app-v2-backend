@@ -20,6 +20,7 @@ from src.user.models import Role, User
 from src.ticket.services.event_store import TicketEventStore
 from src.ticket.services.loaders import require_ticket
 from src.ticket.services.mapper import TicketResponseMapper
+from src.ticket.services.timeline import latest_status_events
 
 
 class TicketCommandService:
@@ -97,7 +98,7 @@ class TicketCommandService:
 
     changes = request.model_dump(exclude_unset=True)
     if not changes:
-      latest = await TicketRepository.get_latest_public_events(db, [ticket.id])
+      latest = latest_status_events(await TicketRepository.get_events(db, ticket.id))
       return TicketResponseMapper.to_public_ticket(
         ticket,
         current_status_event=latest.get(ticket.id),
@@ -124,17 +125,17 @@ class TicketCommandService:
         else None
       )
     payload = TicketDetailsUpdatedPayload.model_validate(payload_values)
-    event = await TicketEventStore._append_event(
+    await TicketEventStore._append_event(
       db,
       ticket,
       actor_user_id=current_user.id,
       event_type=TicketEventType.TICKET_DETAILS_UPDATED,
       payload=payload,
     )
-    latest = await TicketRepository.get_latest_public_events(db, [ticket.id])
+    latest = latest_status_events(await TicketRepository.get_events(db, ticket.id))
     return TicketResponseMapper.to_public_ticket(
       ticket,
-      current_status_event=latest.get(ticket.id) or event,
+      current_status_event=latest.get(ticket.id),
       current_user=current_user,
     )
 
