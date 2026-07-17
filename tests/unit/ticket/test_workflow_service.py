@@ -23,6 +23,7 @@ from src.ticket.schemas import (
   TicketDispatchRequest,
 )
 from src.ticket.workflow_service import TicketWorkflowService
+from src.ticket.services.workflow.queries import TicketWorkflowQueryService
 from src.user.models import Role, User
 
 
@@ -100,7 +101,7 @@ async def test_dispatch_moves_ticket_to_active_office(monkeypatch) -> None:
     lambda _db, event: staged_events.append(event),
   )
   monkeypatch.setattr(
-    TicketWorkflowService,
+    TicketWorkflowQueryService,
     "_internal_detail_response",
     AsyncMock(return_value=sentinel),
   )
@@ -151,7 +152,7 @@ async def test_manager_assigns_officer_as_permanent_case_owner(monkeypatch) -> N
     lambda _db, _event: None,
   )
   monkeypatch.setattr(
-    TicketWorkflowService,
+    TicketWorkflowQueryService,
     "_internal_detail_response",
     AsyncMock(return_value=sentinel),
   )
@@ -213,7 +214,7 @@ async def test_parallel_cosignatures_create_independent_work_items(monkeypatch) 
     lambda _db, item: staged_items.append(item),
   )
   monkeypatch.setattr(
-    TicketWorkflowService,
+    TicketWorkflowQueryService,
     "_internal_detail_response",
     AsyncMock(return_value=sentinel),
   )
@@ -285,7 +286,7 @@ async def test_completing_one_work_item_does_not_close_its_siblings(monkeypatch)
     lambda _db, _event: None,
   )
   monkeypatch.setattr(
-    TicketWorkflowService,
+    TicketWorkflowQueryService,
     "_internal_detail_response",
     AsyncMock(return_value=sentinel),
   )

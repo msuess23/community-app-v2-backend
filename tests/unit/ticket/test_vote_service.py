@@ -42,15 +42,15 @@ async def test_vote_is_added_and_returned_in_summary(monkeypatch) -> None:
   citizen = _citizen()
   ticket = _ticket()
   monkeypatch.setattr(
-    "src.ticket.vote_service.TicketRepository.get_by_id",
+    "src.ticket.services.votes.TicketRepository.get_by_id",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
-    "src.ticket.vote_service.TicketService._can_view_ticket",
+    "src.ticket.services.votes.TicketAccessPolicy.can_view",
     AsyncMock(return_value=True),
   )
   monkeypatch.setattr(
-    "src.ticket.vote_service.TicketRepository.add_vote",
+    "src.ticket.services.votes.TicketRepository.add_vote",
     lambda _db, _vote: None,
   )
 
@@ -71,11 +71,11 @@ async def test_duplicate_vote_is_rejected(monkeypatch) -> None:
     TicketVote(id=uuid4(), ticket_id=ticket.id, user_id=citizen.id)
   )
   monkeypatch.setattr(
-    "src.ticket.vote_service.TicketRepository.get_by_id",
+    "src.ticket.services.votes.TicketRepository.get_by_id",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
-    "src.ticket.vote_service.TicketService._can_view_ticket",
+    "src.ticket.services.votes.TicketAccessPolicy.can_view",
     AsyncMock(return_value=True),
   )
 

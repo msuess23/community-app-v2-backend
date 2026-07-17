@@ -103,15 +103,15 @@ async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) 
 
   monkeypatch.setattr(settings, "TICKET_MEDIA_ROOT", str(tmp_path))
   monkeypatch.setattr(
-    "src.ticket.image_service.TicketRepository.get_by_id_for_update",
+    "src.ticket.services.images.TicketRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
   )
   monkeypatch.setattr(
-    "src.ticket.image_service.TicketRepository.get_images",
+    "src.ticket.services.images.TicketRepository.get_images",
     AsyncMock(return_value=[]),
   )
   monkeypatch.setattr(
-    "src.ticket.image_service.LocalTicketMediaStorage.save_upload",
+    "src.ticket.services.images.LocalTicketMediaStorage.save_upload",
     AsyncMock(
       return_value=StoredTicketImage(
         storage_key=f"{ticket.id}/image.jpg",
@@ -123,11 +123,11 @@ async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) 
   )
   append_event = AsyncMock(return_value=event)
   monkeypatch.setattr(
-    "src.ticket.image_service.TicketService._append_event",
+    "src.ticket.services.images.TicketEventStore._append_event",
     append_event,
   )
   monkeypatch.setattr(
-    "src.ticket.image_service.TicketRepository.add_image",
+    "src.ticket.services.images.TicketRepository.add_image",
     lambda _db, image: staged.append(image),
   )
 

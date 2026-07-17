@@ -1,0 +1,312 @@
+"""Event-sourced ticket image commands and revision-aware reads."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.config import settings
+from src.core.exceptions import (
+  ConflictException,
+  ForbiddenException,
+  ResourceNotFoundException,
+)
+from src.ticket.events import (
+  TicketCoverImageChangedPayload,
+  TicketEventType,
+  TicketImageAddedPayload,
+  TicketImageRemovedPayload,
+  TicketWorkflowState,
+)
+from src.ticket.storage import LocalTicketMediaStorage
+from src.ticket.models import Ticket, TicketImage
+from src.ticket.repository import TicketRepository
+from src.ticket.schemas import TicketImageRemoveRequest, TicketImageResponse
+from src.ticket.services.access_policy import TicketAccessPolicy
+from src.ticket.services.event_store import TicketEventStore
+from src.ticket.services.loaders import require_ticket
+from src.user.models import Role, User
+
+
+class TicketImageService:
+  """Coordinates immutable image files, events and current image projections."""
+
+  @staticmethod
+  def _image_url(ticket_id: uuid.UUID, image_id: uuid.UUID) -> str:
+    """Builds the stable API URL used by the old imageUrl field."""
+
+    return f"{settings.BASE_URL}/tickets/{ticket_id}/images/{image_id}/content"
+
+  @staticmethod
+  def _response(image: TicketImage) -> TicketImageResponse:
+    """Converts one image projection into its API metadata representation."""
+
+    return TicketImageResponse(
+      id=image.id,
+      ticket_id=image.ticket_id,
+      url=TicketImageService._image_url(image.ticket_id, image.id),
+      original_filename=image.original_filename,
+      mime_type=image.mime_type,
+      size_bytes=image.size_bytes,
+      uploaded_by_user_id=image.uploaded_by_user_id,
+      uploaded_at=image.uploaded_at,
+      is_active=image.is_active,
+      is_cover=image.is_cover,
+      removed_at=image.removed_at,
+    )
+
+  @staticmethod
+  async def _require_manage_permission(
+    db: AsyncSession,
+    ticket: Ticket,
+    current_user: User,
+  ) -> None:
+    """Applies the immutable-submission rule and staff workflow permissions."""
+
+    if current_user.role == Role.CITIZEN:
+      if current_user.id != ticket.creator_user_id:
+        raise ForbiddenException("Only the ticket creator may manage these images")
+      if ticket.workflow_state != TicketWorkflowState.NEW:
+        raise ConflictException(
+          "Ticket images can no longer be changed after processing has started.",
+          error_code="TICKET_ALREADY_IN_PROCESS",
+        )
+      return
+
+    if current_user.role not in {Role.OFFICER, Role.MANAGER}:
+      raise ForbiddenException("Only assigned authority staff may manage ticket images")
+    if ticket.workflow_state == TicketWorkflowState.COMPLETED:
+      raise ConflictException(
+        "Images cannot be changed after the ticket is completed.",
+        error_code="TICKET_COMPLETED",
+      )
+    if not await TicketAccessPolicy.can_view_internal(db, ticket, current_user):
+      raise ForbiddenException("The user has no internal access to this ticket")
+
+  @staticmethod
+  async def list_images(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    current_user: User | None,
+    *,
+    include_removed: bool = False,
+  ) -> list[TicketImageResponse]:
+    """Lists current images or, for authorized staff, the complete audit list."""
+
+    ticket = await TicketRepository.get_by_id(db, ticket_id)
+    if ticket is None or not await TicketAccessPolicy.can_view(db, ticket, current_user):
+      raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
+
+    if include_removed:
+      if current_user is None or current_user.role not in {Role.OFFICER, Role.MANAGER}:
+        raise ForbiddenException("Only authority staff may view removed ticket images")
+      if not await TicketAccessPolicy.can_view_internal(db, ticket, current_user):
+        raise ForbiddenException("The user has no internal access to this ticket")
+
+    images = await TicketRepository.get_images(
+      db,
+      ticket_id,
+      include_removed=include_removed,
+    )
+    return [TicketImageService._response(image) for image in images]
+
+  @staticmethod
+  async def add_image(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    upload: UploadFile,
+    current_user: User,
+  ) -> TicketImageResponse:
+    """Stores a new immutable file and records its metadata in the event stream."""
+
+    ticket = await require_ticket(db, ticket_id, for_update=True)
+    await TicketImageService._require_manage_permission(db, ticket, current_user)
+
+    image_id = uuid.uuid4()
+    stored = await LocalTicketMediaStorage.save_upload(
+      upload,
+      ticket_id=ticket.id,
+      image_id=image_id,
+    )
+    active_images = await TicketRepository.get_images(
+      db,
+      ticket.id,
+      include_removed=False,
+      for_update=True,
+    )
+    is_cover = not active_images
+
+    try:
+      event = await TicketEventStore._append_event(
+        db,
+        ticket,
+        actor_user_id=current_user.id,
+        event_type=TicketEventType.TICKET_IMAGE_ADDED,
+        payload=TicketImageAddedPayload(
+          image_id=image_id,
+          storage_key=stored.storage_key,
+          original_filename=stored.original_filename,
+          mime_type=stored.mime_type,
+          size_bytes=stored.size_bytes,
+          is_cover=is_cover,
+        ),
+      )
+      image = TicketImage(
+        id=image_id,
+        ticket_id=ticket.id,
+        storage_key=stored.storage_key,
+        original_filename=stored.original_filename,
+        mime_type=stored.mime_type,
+        size_bytes=stored.size_bytes,
+        uploaded_by_user_id=current_user.id,
+        uploaded_at=event.occurred_at,
+        is_active=True,
+        is_cover=is_cover,
+        added_event_id=event.id,
+        cover_selected_event_id=(event.id if is_cover else None),
+      )
+      TicketRepository.add_image(db, image)
+      await db.flush()
+    except Exception:
+      # Failures before the request commit must not leave an unreferenced file.
+      path = Path(settings.TICKET_MEDIA_ROOT).expanduser().resolve() / stored.storage_key
+      path.unlink(missing_ok=True)
+      raise
+
+    return TicketImageService._response(image)
+
+  @staticmethod
+  async def set_cover(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    image_id: uuid.UUID,
+    current_user: User,
+  ) -> TicketImageResponse:
+    """Changes the cover projection while preserving the decision as an event."""
+
+    ticket = await require_ticket(db, ticket_id, for_update=True)
+    await TicketImageService._require_manage_permission(db, ticket, current_user)
+    images = await TicketRepository.get_images(
+      db,
+      ticket.id,
+      include_removed=False,
+      for_update=True,
+    )
+    selected = next((image for image in images if image.id == image_id), None)
+    if selected is None:
+      raise ResourceNotFoundException(
+        "Ticket image not found",
+        error_code="TICKET_IMAGE_NOT_FOUND",
+      )
+    if selected.is_cover:
+      return TicketImageService._response(selected)
+
+    event = await TicketEventStore._append_event(
+      db,
+      ticket,
+      actor_user_id=current_user.id,
+      event_type=TicketEventType.TICKET_COVER_IMAGE_CHANGED,
+      payload=TicketCoverImageChangedPayload(image_id=selected.id),
+    )
+    for image in images:
+      image.is_cover = image.id == selected.id
+      if image.is_cover:
+        image.cover_selected_event_id = event.id
+    await db.flush()
+    return TicketImageService._response(selected)
+
+  @staticmethod
+  async def remove_image(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    image_id: uuid.UUID,
+    request: TicketImageRemoveRequest,
+    current_user: User,
+  ) -> None:
+    """Deactivates an image projection but intentionally retains its file."""
+
+    ticket = await require_ticket(db, ticket_id, for_update=True)
+    await TicketImageService._require_manage_permission(db, ticket, current_user)
+    images = await TicketRepository.get_images(
+      db,
+      ticket.id,
+      include_removed=False,
+      for_update=True,
+    )
+    image = next((item for item in images if item.id == image_id), None)
+    if image is None:
+      raise ResourceNotFoundException(
+        "Ticket image not found",
+        error_code="TICKET_IMAGE_NOT_FOUND",
+      )
+
+    removed_at = datetime.now(timezone.utc)
+    removed_event = await TicketEventStore._append_event(
+      db,
+      ticket,
+      actor_user_id=current_user.id,
+      event_type=TicketEventType.TICKET_IMAGE_REMOVED,
+      payload=TicketImageRemovedPayload(image_id=image.id, reason=request.reason),
+      occurred_at=removed_at,
+    )
+    image.is_active = False
+    image.is_cover = False
+    image.removed_at = removed_at
+    image.removed_by_user_id = current_user.id
+    image.removed_event_id = removed_event.id
+
+    remaining = [item for item in images if item.id != image.id]
+    if remaining and not any(item.is_cover for item in remaining):
+      # Selecting a replacement cover is a second explicit aggregate event.
+      new_cover = remaining[0]
+      cover_event = await TicketEventStore._append_event(
+        db,
+        ticket,
+        actor_user_id=current_user.id,
+        event_type=TicketEventType.TICKET_COVER_IMAGE_CHANGED,
+        payload=TicketCoverImageChangedPayload(image_id=new_cover.id),
+      )
+      new_cover.is_cover = True
+      new_cover.cover_selected_event_id = cover_event.id
+    await db.flush()
+
+  @staticmethod
+  async def get_content(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    image_id: uuid.UUID,
+    current_user: User | None,
+  ) -> tuple[Path, TicketImage]:
+    """Returns image bytes, including removed revisions only for internal staff."""
+
+    ticket = await TicketRepository.get_by_id(db, ticket_id)
+    image = await TicketRepository.get_image(db, ticket_id, image_id)
+    if ticket is None or image is None:
+      raise ResourceNotFoundException(
+        "Ticket image not found",
+        error_code="TICKET_IMAGE_NOT_FOUND",
+      )
+
+    if image.is_active:
+      if not await TicketAccessPolicy.can_view(db, ticket, current_user):
+        raise ResourceNotFoundException(
+          "Ticket image not found",
+          error_code="TICKET_IMAGE_NOT_FOUND",
+        )
+    else:
+      if current_user is None or current_user.role not in {Role.OFFICER, Role.MANAGER}:
+        raise ResourceNotFoundException(
+          "Ticket image not found",
+          error_code="TICKET_IMAGE_NOT_FOUND",
+        )
+      if not await TicketAccessPolicy.can_view_internal(db, ticket, current_user):
+        raise ResourceNotFoundException(
+          "Ticket image not found",
+          error_code="TICKET_IMAGE_NOT_FOUND",
+        )
+
+    return LocalTicketMediaStorage.resolve_file(image.storage_key), image
