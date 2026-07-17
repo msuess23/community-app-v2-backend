@@ -46,6 +46,7 @@ def _ticket(
   office_id: UUID | None = None,
   primary_officer_id: UUID | None = None,
   current_responsible_user_id: UUID | None = None,
+  pending_return_to_user_id: UUID | None = None,
   version: int = 1,
 ) -> Ticket:
   now = datetime.now(timezone.utc)
@@ -66,6 +67,7 @@ def _ticket(
     workflow_state=workflow_state,
     primary_officer_id=primary_officer_id,
     current_responsible_user_id=current_responsible_user_id,
+    pending_return_to_user_id=pending_return_to_user_id,
     version=version,
     created_at=now,
     updated_at=now,
@@ -328,8 +330,23 @@ async def test_allowed_actions_separate_coordinator_and_task_permissions(monkeyp
     "src.ticket.repository.TicketRepository.has_open_blocking_work_items",
     AsyncMock(return_value=False),
   )
+  monkeypatch.setattr(
+    "src.ticket.repository.TicketRepository.has_open_work_items",
+    AsyncMock(return_value=False),
+  )
+  monkeypatch.setattr(
+    "src.ticket.repository.TicketRepository.get_open_requested_work_item_ids",
+    AsyncMock(return_value=[]),
+  )
 
   allowed = await TicketWorkflowService._allowed_actions(db, ticket, coordinator)
 
-  assert allowed.actions == [TicketWorkflowAction.REQUEST_PARALLEL_COSIGNATURES]
+  assert allowed.actions == [
+    TicketWorkflowAction.FORWARD,
+    TicketWorkflowAction.REQUEST_PARALLEL_COSIGNATURES,
+    TicketWorkflowAction.ESCALATE,
+    TicketWorkflowAction.REQUEST_CITIZEN_RESPONSE,
+    TicketWorkflowAction.RESOLVE,
+  ]
   assert allowed.completable_work_item_ids == []
+  assert allowed.cancellable_work_item_ids == []

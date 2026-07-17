@@ -15,6 +15,7 @@ from src.address.models import Address
 from src.core.filters import SortOrder, apply_bbox_filter, apply_search_filter
 from src.ticket.events import (
   TicketCategory,
+  TicketEventType,
   TicketStatus,
   TicketVisibility,
   TicketWorkflowState,
@@ -379,3 +380,56 @@ class TicketRepository:
       .limit(1)
     )
     return result.scalar_one_or_none() is not None
+
+  @staticmethod
+  async def get_open_requested_work_item_ids(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    requested_by_user_id: uuid.UUID,
+  ) -> list[uuid.UUID]:
+    """Returns open task IDs that the given coordinator originally requested."""
+
+    result = await db.execute(
+      select(TicketWorkItem.id)
+      .where(
+        TicketWorkItem.ticket_id == ticket_id,
+        TicketWorkItem.requested_by_user_id == requested_by_user_id,
+        TicketWorkItem.status == TicketWorkItemStatus.OPEN,
+      )
+      .order_by(TicketWorkItem.created_at.asc(), TicketWorkItem.id.asc())
+    )
+    return list(result.scalars().all())
+
+  @staticmethod
+  async def has_open_work_items(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+  ) -> bool:
+    """Checks whether any projected workflow task remains unfinished."""
+
+    result = await db.execute(
+      select(TicketWorkItem.id)
+      .where(
+        TicketWorkItem.ticket_id == ticket_id,
+        TicketWorkItem.status == TicketWorkItemStatus.OPEN,
+      )
+      .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+  @staticmethod
+  async def get_comment_events(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+  ) -> list[TicketEvent]:
+    """Returns append-only ticket comments in aggregate order."""
+
+    result = await db.execute(
+      select(TicketEvent)
+      .where(
+        TicketEvent.ticket_id == ticket_id,
+        TicketEvent.event_type == TicketEventType.TICKET_COMMENTED,
+      )
+      .order_by(TicketEvent.sequence_number.asc())
+    )
+    return list(result.scalars().all())

@@ -15,12 +15,16 @@ from src.auth.dependencies import (
 from src.core.database import get_db
 from src.core.filters import SortOrder, get_bbox_filter
 from src.core.schemas import PaginatedResponse
+from src.ticket.comment_service import TicketCommentService
 from src.ticket.events import TicketCategory, TicketStatus, TicketWorkflowState
 from src.ticket.models import TicketSortField
 from src.ticket.schemas import (
   PrimaryOfficerAssignmentRequest,
   TicketAllowedActionsResponse,
   TicketCancelRequest,
+  TicketCitizenResponseRequest,
+  TicketCommentCreateRequest,
+  TicketCommentResponse,
   TicketCreateRequest,
   TicketDispatchRequest,
   TicketEventResponse,
@@ -256,6 +260,47 @@ async def execute_ticket_workflow(
   """Executes a validated ad-hoc workflow command."""
 
   return await TicketWorkflowService.execute_workflow(db, ticket_id, request, current_user)
+
+
+@router.post("/{ticket_id}/response", response_model=TicketResponse)
+async def respond_to_ticket_question(
+  ticket_id: uuid.UUID,
+  request: TicketCitizenResponseRequest,
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(role_required(Role.CITIZEN)),
+):
+  """Lets the ticket creator answer the currently pending authority question."""
+
+  return await TicketWorkflowService.respond_as_citizen(
+    db, ticket_id, request, current_user
+  )
+
+
+@router.get("/{ticket_id}/comments", response_model=list[TicketCommentResponse])
+async def list_ticket_comments(
+  ticket_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db),
+  current_user: User | None = Depends(get_optional_current_user),
+):
+  """Returns public comments and internal notes visible to the caller."""
+
+  return await TicketCommentService.list_comments(db, ticket_id, current_user)
+
+
+@router.post(
+  "/{ticket_id}/comments",
+  response_model=TicketCommentResponse,
+  status_code=status.HTTP_201_CREATED,
+)
+async def add_ticket_comment(
+  ticket_id: uuid.UUID,
+  request: TicketCommentCreateRequest,
+  db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(get_current_user),
+):
+  """Appends an immutable citizen-visible comment or internal staff note."""
+
+  return await TicketCommentService.add_comment(db, ticket_id, request, current_user)
 
 
 @router.post("", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)

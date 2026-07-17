@@ -132,3 +132,119 @@ def test_rebuild_ticket_applies_ordered_citizen_events() -> None:
   assert state.description == "Music after 1 AM"
   assert state.visibility == TicketVisibility.PRIVATE
   assert state.version == 2
+
+
+def test_escalation_and_decision_preserve_primary_officer() -> None:
+  from src.ticket.events import EscalationDecisionPayload, TicketEscalatedPayload
+
+  now = datetime.now(timezone.utc)
+  primary_id = uuid4()
+  manager_id = uuid4()
+  state = evolve_ticket(
+    None,
+    TicketEventType.TICKET_SUBMITTED,
+    TicketSubmittedPayload(
+      title="Damaged sidewalk",
+      category=TicketCategory.INFRASTRUCTURE,
+      creator_user_id=uuid4(),
+    ),
+    occurred_at=now,
+  )
+  state = evolve_ticket(
+    state,
+    TicketEventType.TICKET_DISPATCHED,
+    TicketDispatchedPayload(office_id=uuid4()),
+    occurred_at=now + timedelta(minutes=1),
+  )
+  state = evolve_ticket(
+    state,
+    TicketEventType.PRIMARY_OFFICER_ASSIGNED,
+    PrimaryOfficerAssignedPayload(primary_officer_id=primary_id),
+    occurred_at=now + timedelta(minutes=2),
+  )
+
+  state = evolve_ticket(
+    state,
+    TicketEventType.TICKET_ESCALATED,
+    TicketEscalatedPayload(
+      manager_user_id=manager_id,
+      return_to_user_id=primary_id,
+      reason="Approval required",
+    ),
+    occurred_at=now + timedelta(minutes=3),
+  )
+
+  assert state.primary_officer_id == primary_id
+  assert state.current_responsible_user_id == manager_id
+  assert state.pending_return_to_user_id == primary_id
+  assert state.workflow_state == TicketWorkflowState.WAITING_FOR_APPROVAL
+
+  state = evolve_ticket(
+    state,
+    TicketEventType.ESCALATION_APPROVED,
+    EscalationDecisionPayload(return_to_user_id=primary_id, comment="Approved"),
+    occurred_at=now + timedelta(minutes=4),
+  )
+
+  assert state.primary_officer_id == primary_id
+  assert state.current_responsible_user_id == primary_id
+  assert state.pending_return_to_user_id is None
+  assert state.workflow_state == TicketWorkflowState.IN_PROGRESS
+
+
+def test_citizen_response_round_trip_uses_pending_return_target() -> None:
+  from src.ticket.events import CitizenRespondedPayload, CitizenResponseRequestedPayload
+
+  now = datetime.now(timezone.utc)
+  creator_id = uuid4()
+  officer_id = uuid4()
+  state = evolve_ticket(
+    None,
+    TicketEventType.TICKET_SUBMITTED,
+    TicketSubmittedPayload(
+      title="Street damage",
+      category=TicketCategory.INFRASTRUCTURE,
+      creator_user_id=creator_id,
+    ),
+    occurred_at=now,
+  )
+  state = evolve_ticket(
+    state,
+    TicketEventType.TICKET_DISPATCHED,
+    TicketDispatchedPayload(office_id=uuid4()),
+    occurred_at=now + timedelta(minutes=1),
+  )
+  state = evolve_ticket(
+    state,
+    TicketEventType.PRIMARY_OFFICER_ASSIGNED,
+    PrimaryOfficerAssignedPayload(primary_officer_id=officer_id),
+    occurred_at=now + timedelta(minutes=2),
+  )
+  state = evolve_ticket(
+    state,
+    TicketEventType.CITIZEN_RESPONSE_REQUESTED,
+    CitizenResponseRequestedPayload(
+      question="Which house number is affected?",
+      return_to_user_id=officer_id,
+    ),
+    occurred_at=now + timedelta(minutes=3),
+  )
+
+  assert state.current_responsible_user_id == creator_id
+  assert state.pending_return_to_user_id == officer_id
+  assert state.workflow_state == TicketWorkflowState.WAITING_FOR_CITIZEN
+  assert state.public_status_message == "Which house number is affected?"
+
+  state = evolve_ticket(
+    state,
+    TicketEventType.CITIZEN_RESPONDED,
+    CitizenRespondedPayload(
+      message="House number 12",
+      return_to_user_id=officer_id,
+    ),
+    occurred_at=now + timedelta(minutes=4),
+  )
+
+  assert state.current_responsible_user_id == officer_id
+  assert state.pending_return_to_user_id is None
+  assert state.workflow_state == TicketWorkflowState.IN_PROGRESS

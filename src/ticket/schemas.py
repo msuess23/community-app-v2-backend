@@ -178,8 +178,116 @@ class CompleteWorkItemAction(TicketApiModel):
     return _normalize_optional_text(value)
 
 
+class CancelWorkItemAction(TicketApiModel):
+  """Cancels one open task that is no longer required by its requester."""
+
+  action: Literal[TicketWorkflowAction.CANCEL_WORK_ITEM]
+  work_item_id: UUID
+  reason: str | None = Field(None, max_length=1000)
+
+  @field_validator("reason")
+  @classmethod
+  def normalize_reason(cls, value: str | None) -> str | None:
+    return _normalize_optional_text(value)
+
+
+class ForwardTicketAction(TicketApiModel):
+  """Transfers current workflow coordination to another staff member."""
+
+  action: Literal[TicketWorkflowAction.FORWARD]
+  target_user_id: UUID
+  comment: str | None = Field(None, max_length=1000)
+
+  @field_validator("comment")
+  @classmethod
+  def normalize_comment(cls, value: str | None) -> str | None:
+    return _normalize_optional_text(value)
+
+
+class EscalateTicketAction(TicketApiModel):
+  """Requests a decision from one active manager."""
+
+  action: Literal[TicketWorkflowAction.ESCALATE]
+  manager_user_id: UUID
+  reason: str = Field(..., min_length=3, max_length=1000)
+
+  @field_validator("reason")
+  @classmethod
+  def normalize_reason(cls, value: str) -> str:
+    return _normalize_required_text(value)
+
+
+class ApproveEscalationAction(TicketApiModel):
+  """Approves the pending escalation and returns the case to its requester."""
+
+  action: Literal[TicketWorkflowAction.APPROVE_ESCALATION]
+  comment: str | None = Field(None, max_length=1000)
+
+  @field_validator("comment")
+  @classmethod
+  def normalize_comment(cls, value: str | None) -> str | None:
+    return _normalize_optional_text(value)
+
+
+class RejectEscalationAction(TicketApiModel):
+  """Rejects the pending escalation without rejecting the citizen ticket."""
+
+  action: Literal[TicketWorkflowAction.REJECT_ESCALATION]
+  comment: str = Field(..., min_length=3, max_length=1000)
+
+  @field_validator("comment")
+  @classmethod
+  def normalize_comment(cls, value: str) -> str:
+    return _normalize_required_text(value)
+
+
+class RequestCitizenResponseAction(TicketApiModel):
+  """Pauses staff processing until the ticket creator answers a question."""
+
+  action: Literal[TicketWorkflowAction.REQUEST_CITIZEN_RESPONSE]
+  question: str = Field(..., min_length=3, max_length=1000)
+
+  @field_validator("question")
+  @classmethod
+  def normalize_question(cls, value: str) -> str:
+    return _normalize_required_text(value)
+
+
+class ResolveTicketAction(TicketApiModel):
+  """Completes a ticket successfully with a citizen-facing explanation."""
+
+  action: Literal[TicketWorkflowAction.RESOLVE]
+  message: str = Field(..., min_length=3, max_length=1000)
+
+  @field_validator("message")
+  @classmethod
+  def normalize_message(cls, value: str) -> str:
+    return _normalize_required_text(value)
+
+
+class RejectTicketAction(TicketApiModel):
+  """Ends a ticket as rejected with a citizen-facing explanation."""
+
+  action: Literal[TicketWorkflowAction.REJECT_TICKET]
+  message: str = Field(..., min_length=3, max_length=1000)
+
+  @field_validator("message")
+  @classmethod
+  def normalize_message(cls, value: str) -> str:
+    return _normalize_required_text(value)
+
+
 TicketWorkflowRequest: TypeAlias = Annotated[
-  RequestParallelCosignaturesAction | CompleteWorkItemAction,
+  RequestParallelCosignaturesAction
+  | CompleteWorkItemAction
+  | CancelWorkItemAction
+  | ForwardTicketAction
+  | EscalateTicketAction
+  | ApproveEscalationAction
+  | RejectEscalationAction
+  | RequestCitizenResponseAction
+  | ResolveTicketAction
+  | RejectTicketAction,
   Field(discriminator="action"),
 ]
 
@@ -220,6 +328,7 @@ class TicketInternalResponse(TicketResponse):
   workflow_state: TicketWorkflowState
   primary_officer_id: UUID | None = None
   current_responsible_user_id: UUID | None = None
+  pending_return_to_user_id: UUID | None = None
 
 
 class TicketAllowedActionsResponse(TicketApiModel):
@@ -227,6 +336,7 @@ class TicketAllowedActionsResponse(TicketApiModel):
 
   actions: list[TicketWorkflowAction]
   completable_work_item_ids: list[UUID] = Field(default_factory=list)
+  cancellable_work_item_ids: list[UUID] = Field(default_factory=list)
 
 
 class TicketEventResponse(TicketApiModel):
@@ -267,3 +377,37 @@ class TicketInternalDetailResponse(TicketInternalResponse):
 
   work_items: list[TicketWorkItemResponse] = Field(default_factory=list)
   allowed_actions: TicketAllowedActionsResponse
+
+
+class TicketCitizenResponseRequest(TicketApiModel):
+  """Citizen answer to the currently pending authority question."""
+
+  message: str = Field(..., min_length=1, max_length=2000)
+
+  @field_validator("message")
+  @classmethod
+  def normalize_message(cls, value: str) -> str:
+    return _normalize_required_text(value)
+
+
+class TicketCommentCreateRequest(TicketApiModel):
+  """Creates one immutable ticket comment event."""
+
+  text: str = Field(..., min_length=1, max_length=2000)
+  is_internal: bool = False
+
+  @field_validator("text")
+  @classmethod
+  def normalize_text(cls, value: str) -> str:
+    return _normalize_required_text(value)
+
+
+class TicketCommentResponse(TicketApiModel):
+  """Comment projection reconstructed directly from a ticket event."""
+
+  id: UUID
+  ticket_id: UUID
+  text: str
+  is_internal: bool
+  author_user_id: UUID
+  created_at: datetime

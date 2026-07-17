@@ -28,6 +28,7 @@ from src.ticket.events import (
   TicketEventType,
   TicketStatus,
   TicketSubmittedPayload,
+  TicketCommentedPayload,
   TicketVisibility,
   TicketWorkflowState,
   evolve_ticket,
@@ -79,6 +80,7 @@ class TicketService:
       workflow_state=ticket.workflow_state,
       primary_officer_id=ticket.primary_officer_id,
       current_responsible_user_id=ticket.current_responsible_user_id,
+      pending_return_to_user_id=ticket.pending_return_to_user_id,
       version=ticket.version,
       created_at=ticket.created_at,
       updated_at=ticket.updated_at,
@@ -100,6 +102,7 @@ class TicketService:
     ticket.workflow_state = state.workflow_state
     ticket.primary_officer_id = state.primary_officer_id
     ticket.current_responsible_user_id = state.current_responsible_user_id
+    ticket.pending_return_to_user_id = state.pending_return_to_user_id
     ticket.version = state.version
     ticket.created_at = state.created_at
     ticket.updated_at = state.updated_at
@@ -110,6 +113,7 @@ class TicketService:
   def _event_visibility(
     event_type: TicketEventType,
     state: TicketAggregateState,
+    payload,
   ) -> tuple[bool, TicketStatus | None, str | None]:
     """Defines which workflow changes become part of the citizen timeline."""
 
@@ -126,6 +130,10 @@ class TicketService:
       return True, state.public_status, state.public_status_message
     if event_type == TicketEventType.TICKET_DETAILS_UPDATED:
       return True, None, None
+    if event_type == TicketEventType.TICKET_COMMENTED:
+      comment = payload
+      assert isinstance(comment, TicketCommentedPayload)
+      return not comment.is_internal, None, None
     return False, None, None
 
   @staticmethod
@@ -143,6 +151,7 @@ class TicketService:
     citizen_visible, public_status, public_message = TicketService._event_visibility(
       event_type,
       state,
+      payload,
     )
     return TicketEvent(
       id=uuid.uuid4(),

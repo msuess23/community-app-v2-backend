@@ -61,7 +61,7 @@ class TicketEventType(str, enum.Enum):
   TICKET_CANCELLED = "TICKET_CANCELLED"
   TICKET_DISPATCHED = "TICKET_DISPATCHED"
   PRIMARY_OFFICER_ASSIGNED = "PRIMARY_OFFICER_ASSIGNED"
-  CURRENT_RESPONSIBLE_CHANGED = "CURRENT_RESPONSIBLE_CHANGED"
+  TICKET_FORWARDED = "TICKET_FORWARDED"
   PARALLEL_WORK_ITEMS_REQUESTED = "PARALLEL_WORK_ITEMS_REQUESTED"
   WORK_ITEM_COMPLETED = "WORK_ITEM_COMPLETED"
   WORK_ITEM_CANCELLED = "WORK_ITEM_CANCELLED"
@@ -106,6 +106,14 @@ class TicketWorkflowAction(str, enum.Enum):
   ASSIGN_PRIMARY_OFFICER = "ASSIGN_PRIMARY_OFFICER"
   REQUEST_PARALLEL_COSIGNATURES = "REQUEST_PARALLEL_COSIGNATURES"
   COMPLETE_WORK_ITEM = "COMPLETE_WORK_ITEM"
+  CANCEL_WORK_ITEM = "CANCEL_WORK_ITEM"
+  FORWARD = "FORWARD"
+  ESCALATE = "ESCALATE"
+  APPROVE_ESCALATION = "APPROVE_ESCALATION"
+  REJECT_ESCALATION = "REJECT_ESCALATION"
+  REQUEST_CITIZEN_RESPONSE = "REQUEST_CITIZEN_RESPONSE"
+  RESOLVE = "RESOLVE"
+  REJECT_TICKET = "REJECT_TICKET"
 
 
 class AddressSnapshot(BaseModel):
@@ -160,10 +168,10 @@ class PrimaryOfficerAssignedPayload(BaseModel):
   comment: str | None = None
 
 
-class CurrentResponsibleChangedPayload(BaseModel):
-  """Moves overall workflow coordination without changing the case owner."""
+class TicketForwardedPayload(BaseModel):
+  """Moves overall coordination to another employee without changing ownership."""
 
-  current_responsible_user_id: UUID
+  target_user_id: UUID
   comment: str | None = None
 
 
@@ -258,7 +266,7 @@ EventPayload: TypeAlias = (
   | TicketCancelledPayload
   | TicketDispatchedPayload
   | PrimaryOfficerAssignedPayload
-  | CurrentResponsibleChangedPayload
+  | TicketForwardedPayload
   | ParallelWorkItemsRequestedPayload
   | WorkItemCompletedPayload
   | WorkItemCancelledPayload
@@ -277,7 +285,7 @@ _EVENT_PAYLOAD_TYPES: dict[TicketEventType, type[BaseModel]] = {
   TicketEventType.TICKET_CANCELLED: TicketCancelledPayload,
   TicketEventType.TICKET_DISPATCHED: TicketDispatchedPayload,
   TicketEventType.PRIMARY_OFFICER_ASSIGNED: PrimaryOfficerAssignedPayload,
-  TicketEventType.CURRENT_RESPONSIBLE_CHANGED: CurrentResponsibleChangedPayload,
+  TicketEventType.TICKET_FORWARDED: TicketForwardedPayload,
   TicketEventType.PARALLEL_WORK_ITEMS_REQUESTED: ParallelWorkItemsRequestedPayload,
   TicketEventType.WORK_ITEM_COMPLETED: WorkItemCompletedPayload,
   TicketEventType.WORK_ITEM_CANCELLED: WorkItemCancelledPayload,
@@ -309,6 +317,7 @@ class TicketAggregateState(BaseModel):
   workflow_state: TicketWorkflowState
   primary_officer_id: UUID | None = None
   current_responsible_user_id: UUID | None = None
+  pending_return_to_user_id: UUID | None = None
   version: int = 0
   created_at: datetime
   updated_at: datetime
@@ -380,6 +389,7 @@ def evolve_ticket(
     next_state.public_status_message = "Ticket cancelled"
     next_state.workflow_state = TicketWorkflowState.COMPLETED
     next_state.current_responsible_user_id = None
+    next_state.pending_return_to_user_id = None
     next_state.cancelled_at = occurred_at
   elif event_type == TicketEventType.TICKET_DISPATCHED:
     dispatched = validated
@@ -394,23 +404,31 @@ def evolve_ticket(
     next_state.primary_officer_id = assigned.primary_officer_id
     next_state.current_responsible_user_id = assigned.primary_officer_id
     next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
-  elif event_type == TicketEventType.CURRENT_RESPONSIBLE_CHANGED:
-    responsibility = validated
-    assert isinstance(responsibility, CurrentResponsibleChangedPayload)
-    next_state.current_responsible_user_id = responsibility.current_responsible_user_id
+  elif event_type == TicketEventType.TICKET_FORWARDED:
+    forwarded = validated
+    assert isinstance(forwarded, TicketForwardedPayload)
+    next_state.current_responsible_user_id = forwarded.target_user_id
+    next_state.pending_return_to_user_id = None
   elif event_type == TicketEventType.CITIZEN_RESPONSE_REQUESTED:
+    request = validated
+    assert isinstance(request, CitizenResponseRequestedPayload)
     next_state.workflow_state = TicketWorkflowState.WAITING_FOR_CITIZEN
     next_state.current_responsible_user_id = state.creator_user_id
+    next_state.pending_return_to_user_id = request.return_to_user_id
+    next_state.public_status_message = request.question
   elif event_type == TicketEventType.CITIZEN_RESPONDED:
     response = validated
     assert isinstance(response, CitizenRespondedPayload)
     next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
     next_state.current_responsible_user_id = response.return_to_user_id
+    next_state.pending_return_to_user_id = None
+    next_state.public_status_message = "Citizen response received"
   elif event_type == TicketEventType.TICKET_ESCALATED:
     escalation = validated
     assert isinstance(escalation, TicketEscalatedPayload)
     next_state.workflow_state = TicketWorkflowState.WAITING_FOR_APPROVAL
     next_state.current_responsible_user_id = escalation.manager_user_id
+    next_state.pending_return_to_user_id = escalation.return_to_user_id
   elif event_type in {
     TicketEventType.ESCALATION_APPROVED,
     TicketEventType.ESCALATION_REJECTED,
@@ -419,6 +437,9 @@ def evolve_ticket(
     assert isinstance(decision, EscalationDecisionPayload)
     next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
     next_state.current_responsible_user_id = decision.return_to_user_id
+    next_state.pending_return_to_user_id = None
+    if event_type == TicketEventType.ESCALATION_APPROVED:
+      next_state.public_status_message = decision.comment or "Proposed measure approved"
   elif event_type == TicketEventType.TICKET_RESOLVED:
     completed = validated
     assert isinstance(completed, TicketCompletedPayload)
@@ -426,6 +447,7 @@ def evolve_ticket(
     next_state.public_status_message = completed.message or "Ticket resolved"
     next_state.workflow_state = TicketWorkflowState.COMPLETED
     next_state.current_responsible_user_id = None
+    next_state.pending_return_to_user_id = None
     next_state.resolved_at = occurred_at
   elif event_type == TicketEventType.TICKET_REJECTED:
     completed = validated
@@ -434,6 +456,7 @@ def evolve_ticket(
     next_state.public_status_message = completed.message or "Ticket rejected"
     next_state.workflow_state = TicketWorkflowState.COMPLETED
     next_state.current_responsible_user_id = None
+    next_state.pending_return_to_user_id = None
     next_state.resolved_at = occurred_at
   # Work-item and comment events update their own read models.  They still
   # advance the aggregate version so the complete event stream stays ordered.

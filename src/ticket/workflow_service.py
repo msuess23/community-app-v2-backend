@@ -28,25 +28,44 @@ from src.ticket.events import (
   TicketWorkflowState,
   TicketWorkItemKind,
   TicketWorkItemStatus,
+  WorkItemCancelledPayload,
   WorkItemCompletedPayload,
 )
 from src.ticket.models import Ticket, TicketEvent, TicketSortField, TicketWorkItem
 from src.ticket.repository import TicketRepository
 from src.ticket.schemas import (
+  ApproveEscalationAction,
+  CancelWorkItemAction,
   CompleteWorkItemAction,
+  EscalateTicketAction,
+  ForwardTicketAction,
   PrimaryOfficerAssignmentRequest,
+  RejectEscalationAction,
+  RejectTicketAction,
+  RequestCitizenResponseAction,
   RequestParallelCosignaturesAction,
+  ResolveTicketAction,
   TicketAllowedActionsResponse,
+  TicketCitizenResponseRequest,
   TicketDispatchRequest,
   TicketEventResponse,
   TicketInternalDetailResponse,
   TicketInternalResponse,
+  TicketResponse,
   TicketWorkflowRequest,
   TicketWorkItemResponse,
 )
 from src.ticket.service import TicketService
+from src.ticket.workflow_command_service import TicketWorkflowCommandService
+from src.ticket.workflow_rules import (
+  STAFF_ROLES,
+  require_active_staff,
+  require_current_coordinator,
+  require_no_blocking_tasks,
+)
 from src.user.models import Role, User
-from src.user.repository import UserRepository
+
+
 
 
 class TicketWorkflowService:
@@ -71,6 +90,7 @@ class TicketWorkflowService:
       workflow_state=ticket.workflow_state,
       primary_officer_id=ticket.primary_officer_id,
       current_responsible_user_id=ticket.current_responsible_user_id,
+      pending_return_to_user_id=ticket.pending_return_to_user_id,
     )
 
   @staticmethod
@@ -111,7 +131,7 @@ class TicketWorkflowService:
     )
 
   @staticmethod
-  async def _can_view_internal_ticket(
+  async def can_view_internal_ticket(
     db: AsyncSession,
     ticket: Ticket,
     current_user: User,
@@ -120,11 +140,12 @@ class TicketWorkflowService:
 
     if current_user.role == Role.DISPATCHER:
       return True
-    if current_user.role not in {Role.OFFICER, Role.MANAGER}:
+    if current_user.role not in STAFF_ROLES:
       return False
     if current_user.id in {
       ticket.primary_officer_id,
       ticket.current_responsible_user_id,
+      ticket.pending_return_to_user_id,
     }:
       return True
     if current_user.office_id is not None and current_user.office_id == ticket.office_id:
@@ -145,6 +166,11 @@ class TicketWorkflowService:
 
     actions: list[TicketWorkflowAction] = []
     completable_ids = await TicketRepository.get_open_work_item_ids_for_user(
+      db,
+      ticket.id,
+      current_user.id,
+    )
+    cancellable_ids = await TicketRepository.get_open_requested_work_item_ids(
       db,
       ticket.id,
       current_user.id,
@@ -170,20 +196,53 @@ class TicketWorkflowService:
     ):
       actions.append(TicketWorkflowAction.ASSIGN_PRIMARY_OFFICER)
 
-    if (
-      current_user.role in {Role.OFFICER, Role.MANAGER}
+    is_coordinator = (
+      current_user.role in STAFF_ROLES
       and ticket.current_responsible_user_id == current_user.id
-      and ticket.workflow_state == TicketWorkflowState.IN_PROGRESS
-      and not await TicketRepository.has_open_blocking_work_items(db, ticket.id)
+    )
+    has_blocking_tasks = await TicketRepository.has_open_blocking_work_items(
+      db,
+      ticket.id,
+    )
+    has_any_tasks = await TicketRepository.has_open_work_items(db, ticket.id)
+
+    if is_coordinator and ticket.workflow_state == TicketWorkflowState.IN_PROGRESS:
+      if not has_blocking_tasks:
+        actions.extend(
+          [
+            TicketWorkflowAction.FORWARD,
+            TicketWorkflowAction.REQUEST_PARALLEL_COSIGNATURES,
+            TicketWorkflowAction.ESCALATE,
+            TicketWorkflowAction.REQUEST_CITIZEN_RESPONSE,
+          ]
+        )
+      if not has_any_tasks:
+        actions.append(TicketWorkflowAction.RESOLVE)
+        if current_user.role == Role.MANAGER:
+          actions.append(TicketWorkflowAction.REJECT_TICKET)
+
+    if (
+      current_user.role == Role.MANAGER
+      and ticket.current_responsible_user_id == current_user.id
+      and ticket.workflow_state == TicketWorkflowState.WAITING_FOR_APPROVAL
+      and ticket.pending_return_to_user_id is not None
     ):
-      actions.append(TicketWorkflowAction.REQUEST_PARALLEL_COSIGNATURES)
+      actions.extend(
+        [
+          TicketWorkflowAction.APPROVE_ESCALATION,
+          TicketWorkflowAction.REJECT_ESCALATION,
+        ]
+      )
 
     if completable_ids:
       actions.append(TicketWorkflowAction.COMPLETE_WORK_ITEM)
+    if cancellable_ids and ticket.current_responsible_user_id == current_user.id:
+      actions.append(TicketWorkflowAction.CANCEL_WORK_ITEM)
 
     return TicketAllowedActionsResponse(
       actions=actions,
       completable_work_item_ids=completable_ids,
+      cancellable_work_item_ids=cancellable_ids,
     )
 
   @staticmethod
@@ -264,7 +323,7 @@ class TicketWorkflowService:
     """Returns the workflow projection, tasks and available actions."""
 
     ticket = await TicketRepository.get_by_id(db, ticket_id)
-    if ticket is None or not await TicketWorkflowService._can_view_internal_ticket(
+    if ticket is None or not await TicketWorkflowService.can_view_internal_ticket(
       db,
       ticket,
       current_user,
@@ -285,7 +344,7 @@ class TicketWorkflowService:
     """Returns the complete chronological event stream to authorized staff."""
 
     ticket = await TicketRepository.get_by_id(db, ticket_id)
-    if ticket is None or not await TicketWorkflowService._can_view_internal_ticket(
+    if ticket is None or not await TicketWorkflowService.can_view_internal_ticket(
       db,
       ticket,
       current_user,
@@ -303,7 +362,7 @@ class TicketWorkflowService:
     """Returns commands the staff client may currently offer to the user."""
 
     ticket = await TicketRepository.get_by_id(db, ticket_id)
-    if ticket is None or not await TicketWorkflowService._can_view_internal_ticket(
+    if ticket is None or not await TicketWorkflowService.can_view_internal_ticket(
       db,
       ticket,
       current_user,
@@ -380,13 +439,15 @@ class TicketWorkflowService:
     if current_user.office_id != ticket.office_id:
       raise ForbiddenException("Only a manager of the assigned office may act")
 
-    officer = await UserRepository.get_by_id(db, request.primary_officer_id)
-    if (
-      officer is None
-      or not officer.is_active
-      or officer.role != Role.OFFICER
-      or officer.office_id != ticket.office_id
-    ):
+    officer = await require_active_staff(
+      db,
+      request.primary_officer_id,
+      roles={Role.OFFICER},
+      error_message=(
+        "The primary officer must be an active officer of the assigned office."
+      ),
+    )
+    if officer.office_id != ticket.office_id:
       raise WorkflowValidationException(
         "The primary officer must be an active officer of the assigned office."
       )
@@ -414,22 +475,36 @@ class TicketWorkflowService:
     request: TicketWorkflowRequest,
     current_user: User,
   ) -> TicketInternalDetailResponse:
-    """Executes one currently supported ad-hoc workflow command."""
+    """Dispatches one validated polymorphic workflow command."""
 
     if isinstance(request, RequestParallelCosignaturesAction):
       return await TicketWorkflowService._request_parallel_cosignatures(
-        db,
-        ticket_id,
-        request,
-        current_user,
+        db, ticket_id, request, current_user
       )
     if isinstance(request, CompleteWorkItemAction):
       return await TicketWorkflowService._complete_work_item(
-        db,
-        ticket_id,
-        request,
-        current_user,
+        db, ticket_id, request, current_user
       )
+    if isinstance(request, CancelWorkItemAction):
+      return await TicketWorkflowService._cancel_work_item(
+        db, ticket_id, request, current_user
+      )
+
+    command_handlers = {
+      ForwardTicketAction: TicketWorkflowCommandService.forward_ticket,
+      EscalateTicketAction: TicketWorkflowCommandService.escalate_ticket,
+      ApproveEscalationAction: TicketWorkflowCommandService.approve_escalation,
+      RejectEscalationAction: TicketWorkflowCommandService.reject_escalation,
+      RequestCitizenResponseAction: TicketWorkflowCommandService.request_citizen_response,
+      ResolveTicketAction: TicketWorkflowCommandService.resolve_ticket,
+      RejectTicketAction: TicketWorkflowCommandService.reject_ticket,
+    }
+    for request_type, handler in command_handlers.items():
+      if isinstance(request, request_type):
+        ticket = await handler(db, ticket_id, request, current_user)
+        return await TicketWorkflowService._internal_detail_response(
+          db, ticket, current_user
+        )
     raise WorkflowValidationException("Unsupported workflow action.")
 
   @staticmethod
@@ -444,30 +519,16 @@ class TicketWorkflowService:
     ticket = await TicketRepository.get_by_id_for_update(db, ticket_id)
     if ticket is None:
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
-    if current_user.role not in {Role.OFFICER, Role.MANAGER}:
-      raise ForbiddenException("Only authority staff may request cosignatures")
-    if ticket.current_responsible_user_id != current_user.id:
-      raise ForbiddenException("Only the current responsible user may create tasks")
+    require_current_coordinator(ticket, current_user)
     if ticket.workflow_state != TicketWorkflowState.IN_PROGRESS:
       raise WorkflowValidationException(
         "Parallel cosignatures require a ticket in active processing."
       )
-    if await TicketRepository.has_open_blocking_work_items(db, ticket.id):
-      raise WorkflowValidationException(
-        "Complete the current blocking task group before starting another one."
-      )
+    await require_no_blocking_tasks(db, ticket)
 
     assignees: list[User] = []
     for assignee_id in request.assignee_user_ids:
-      assignee = await UserRepository.get_by_id(db, assignee_id)
-      if (
-        assignee is None
-        or not assignee.is_active
-        or assignee.role not in {Role.OFFICER, Role.MANAGER}
-      ):
-        raise WorkflowValidationException(
-          "Every cosignature target must be an active officer or manager."
-        )
+      assignee = await require_active_staff(db, assignee_id)
       if assignee.id == current_user.id:
         raise WorkflowValidationException("A user cannot request their own cosignature.")
       assignees.append(assignee)
@@ -568,10 +629,80 @@ class TicketWorkflowService:
     work_item.completed_at = completed_at
     await db.flush()
 
-    # The current responsible user remains the coordinator. Parallel assignees
-    # finish only their own task and never implicitly seize the whole case.
+    # Parallel assignees complete only their own task. The current responsible
+    # user remains the coordinator of the complete ticket workflow.
     return await TicketWorkflowService._internal_detail_response(
       db,
       ticket,
       current_user,
+    )
+
+  @staticmethod
+  async def _cancel_work_item(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    request: CancelWorkItemAction,
+    current_user: User,
+  ) -> TicketInternalDetailResponse:
+    """Cancels one open task without modifying completed sibling tasks."""
+
+    ticket = await TicketRepository.get_by_id_for_update(db, ticket_id)
+    if ticket is None:
+      raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
+    require_current_coordinator(ticket, current_user)
+
+    work_item = await TicketRepository.get_work_item_for_update(db, request.work_item_id)
+    if work_item is None or work_item.ticket_id != ticket.id:
+      raise ResourceNotFoundException(
+        "Work item not found",
+        error_code="TICKET_WORK_ITEM_NOT_FOUND",
+      )
+    if work_item.requested_by_user_id != current_user.id:
+      raise ForbiddenException("Only the task requester may cancel this work item")
+    if work_item.status != TicketWorkItemStatus.OPEN:
+      raise ConflictException(
+        "The work item has already been completed or cancelled.",
+        error_code="TICKET_WORK_ITEM_CLOSED",
+      )
+
+    cancelled_at = datetime.now(timezone.utc)
+    event = await TicketService._append_event(
+      db,
+      ticket,
+      actor_user_id=current_user.id,
+      event_type=TicketEventType.WORK_ITEM_CANCELLED,
+      payload=WorkItemCancelledPayload(
+        work_item_id=work_item.id,
+        reason=request.reason,
+      ),
+      occurred_at=cancelled_at,
+    )
+    work_item.status = TicketWorkItemStatus.CANCELLED
+    work_item.completed_event_id = event.id
+    work_item.completed_at = cancelled_at
+    await db.flush()
+    return await TicketWorkflowService._internal_detail_response(
+      db,
+      ticket,
+      current_user,
+    )
+
+
+  @staticmethod
+  async def respond_as_citizen(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    request: TicketCitizenResponseRequest,
+    current_user: User,
+  ) -> TicketResponse:
+    """Returns the citizen-facing projection after a requested response."""
+
+    ticket, event = await TicketWorkflowCommandService.respond_as_citizen(
+      db, ticket_id, request, current_user
+    )
+    latest = await TicketRepository.get_latest_public_events(db, [ticket.id])
+    return TicketService._ticket_response(
+      ticket,
+      current_status_event=latest.get(ticket.id) or event,
+      current_user=current_user,
     )

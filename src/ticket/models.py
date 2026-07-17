@@ -104,6 +104,12 @@ class Ticket(Base):
     nullable=True,
     index=True,
   )
+  pending_return_to_user_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("users.id"),
+    nullable=True,
+    index=True,
+  )
 
   version = Column(Integer, nullable=False, default=1)
   created_at = Column(
@@ -133,6 +139,10 @@ class Ticket(Base):
   current_responsible_user = relationship(
     "User",
     foreign_keys=[current_responsible_user_id],
+  )
+  pending_return_to_user = relationship(
+    "User",
+    foreign_keys=[pending_return_to_user_id],
   )
   events = relationship(
     "TicketEvent",
