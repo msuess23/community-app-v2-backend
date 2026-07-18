@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from src.core.request_models import StrictRequestModel
 from src.core.schemas import BaseMetadataResponse
 from src.core.security import ensure_bcrypt_compatible, normalize_email
 from src.user.models import Role
@@ -16,8 +17,7 @@ def _normalize_name(value: str) -> str:
   return normalized
 
 
-class UserCreate(BaseModel):
-  model_config = ConfigDict(extra="forbid")
+class UserCreate(StrictRequestModel):
 
   email: EmailStr
   password: str = Field(..., min_length=8, max_length=128)
@@ -51,9 +51,16 @@ class UserResponse(BaseMetadataResponse):
   model_config = ConfigDict(from_attributes=True)
 
 
-class UserUpdate(BaseModel):
+class UserUpdate(StrictRequestModel):
   first_name: Optional[str] = Field(None, min_length=2, max_length=100)
   last_name: Optional[str] = Field(None, min_length=2, max_length=100)
+
+  @field_validator("first_name", "last_name", mode="before")
+  @classmethod
+  def reject_null_names(cls, value: object) -> object:
+    if value is None:
+      raise ValueError("name fields cannot be null")
+    return value
 
   @field_validator("first_name", "last_name")
   @classmethod
@@ -66,6 +73,13 @@ class AdminUserUpdate(UserUpdate):
   office_id: Optional[UUID] = None
   change_reason: str = Field(..., min_length=3, max_length=500)
 
+  @field_validator("role", mode="before")
+  @classmethod
+  def reject_null_role(cls, value: object) -> object:
+    if value is None:
+      raise ValueError("role cannot be null")
+    return value
+
   @field_validator("change_reason")
   @classmethod
   def normalize_change_reason(cls, value: str) -> str:
@@ -75,7 +89,7 @@ class AdminUserUpdate(UserUpdate):
     return normalized
 
 
-class UserDeactivateRequest(BaseModel):
+class UserDeactivateRequest(StrictRequestModel):
   change_reason: str = Field(..., min_length=3, max_length=500)
 
   @field_validator("change_reason")

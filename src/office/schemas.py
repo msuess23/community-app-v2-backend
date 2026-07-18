@@ -10,6 +10,7 @@ from src.address.schemas import (
   AddressResponse,
   AddressUpdate,
 )
+from src.core.request_models import StrictRequestModel
 from src.core.schemas import BaseMetadataResponse
 
 
@@ -64,7 +65,7 @@ def _normalize_opening_hours(value: Optional[str]) -> Optional[str]:
   return ", ".join(item[2] for item in intervals)
 
 
-class OpeningHours(BaseModel):
+class OpeningHours(StrictRequestModel):
   monday: Optional[str] = None
   tuesday: Optional[str] = None
   wednesday: Optional[str] = None
@@ -79,7 +80,7 @@ class OpeningHours(BaseModel):
     return _normalize_opening_hours(value)
 
 
-class OfficeBase(BaseModel):
+class OfficeBase(StrictRequestModel):
   name: str = Field(..., min_length=3, max_length=150)
   description: Optional[str] = Field(None, max_length=1000)
   contact_email: Optional[EmailStr] = None
@@ -117,7 +118,7 @@ class OfficeCreate(OfficeBase):
   address: Optional[AddressCreate] = None
 
 
-class OfficeUpdate(BaseModel):
+class OfficeUpdate(StrictRequestModel):
   name: Optional[str] = Field(None, min_length=3, max_length=150)
   description: Optional[str] = Field(None, max_length=1000)
   contact_email: Optional[EmailStr] = None
@@ -126,6 +127,13 @@ class OfficeUpdate(BaseModel):
   opening_hours: Optional[OpeningHours] = None
   address: Optional[AddressUpdate] = None
   change_reason: str = Field(..., min_length=3, max_length=500)
+
+  @field_validator("name", "services", mode="before")
+  @classmethod
+  def reject_null_required_update_fields(cls, value: object) -> object:
+    if value is None:
+      raise ValueError("name and services cannot be null")
+    return value
 
   @field_validator("name")
   @classmethod
@@ -151,7 +159,7 @@ class OfficeUpdate(BaseModel):
     return normalized
 
 
-class OfficeDeactivateRequest(BaseModel):
+class OfficeDeactivateRequest(StrictRequestModel):
   change_reason: str = Field(..., min_length=3, max_length=500)
 
   @field_validator("change_reason")

@@ -16,6 +16,7 @@ from src.ticket.schemas import (
   CompleteTicketAction,
   DecideEscalationAction,
   RequestCosignatureAction,
+  TicketInternalResponse,
   TicketResponse,
   TicketStatusResponse,
 )
@@ -27,22 +28,26 @@ def test_ticket_response_uses_plain_snake_case_fields() -> None:
     id=uuid4(),
     title="Pothole",
     category=TicketCategory.INFRASTRUCTURE,
-    creator_user_id=uuid4(),
     visibility=TicketVisibility.PUBLIC,
     created_at=now,
     current_status=TicketStatusResponse(
       id=uuid4(),
       status=TicketStatus.OPEN,
-      created_by_user_id=uuid4(),
       created_at=now,
     ),
     version=1,
   )
 
   data = response.model_dump()
-  assert "creator_user_id" in data
+  assert "creator_user_id" not in data
   assert "current_status" in data
-  assert "creatorUserId" not in data
+
+  internal = TicketInternalResponse(
+    **data,
+    creator_user_id=uuid4(),
+    workflow_state="NEW",
+  )
+  assert "creator_user_id" in internal.model_dump()
 
 
 def test_cosignature_action_rejects_camel_case_input() -> None:
@@ -73,3 +78,30 @@ def test_combined_decision_and_completion_actions_validate() -> None:
   )
   assert decision.decision == EscalationDecision.APPROVED
   assert completion.outcome == TicketCompletionOutcome.RESOLVED
+
+
+def test_ticket_update_rejects_null_for_non_clearable_fields() -> None:
+  from src.ticket.schemas import TicketUpdateRequest
+
+  for payload in (
+    {"title": None},
+    {"category": None},
+    {"visibility": None},
+  ):
+    with pytest.raises(ValidationError):
+      TicketUpdateRequest.model_validate(payload)
+
+  update = TicketUpdateRequest(description=None, address=None)
+  assert update.description is None
+  assert update.address is None
+
+
+def test_workflow_requests_reject_unknown_fields() -> None:
+  with pytest.raises(ValidationError):
+    RequestCosignatureAction.model_validate(
+      {
+        "action": TicketWorkflowAction.REQUEST_COSIGNATURE,
+        "target_user_id": uuid4(),
+        "unexpected": True,
+      }
+    )

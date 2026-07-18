@@ -41,7 +41,21 @@ def test_ticket_openapi_uses_snake_case_contract() -> None:
 
   assert {"office_id", "created_from", "created_to", "sort_by"} <= public_parameters
   assert {"workflow_state", "sort_by"} <= queue_parameters
-  assert {"creator_user_id", "current_status", "image_url"} <= ticket_fields
-  assert "creatorUserId" not in ticket_fields
+  assert {"current_status", "image_url"} <= ticket_fields
+  assert "creator_user_id" not in ticket_fields
+  internal_fields = set(
+    spec["components"]["schemas"]["TicketInternalResponse"]["properties"]
+  )
+  assert "creator_user_id" in internal_fields
   assert "target_user_id" in cosignature_fields
   assert "targetUserId" not in cosignature_fields
+
+
+def test_public_ticket_schemas_do_not_expose_internal_user_ids() -> None:
+  schemas = app.openapi()["components"]["schemas"]
+
+  assert "creator_user_id" not in schemas["TicketResponse"]["properties"]
+  assert "created_by_user_id" not in schemas["TicketStatusResponse"]["properties"]
+  assert "author_user_id" not in schemas["TicketCommentResponse"]["properties"]
+  assert "uploaded_by_user_id" not in schemas["TicketImageResponse"]["properties"]
+  assert "creator_user_id" in schemas["TicketInternalResponse"]["properties"]

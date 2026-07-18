@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.auth.repository import AuthRepository
-from src.core.exceptions import ForbiddenException
+from src.core.exceptions import ConflictException, ForbiddenException
+from src.ticket.services.lifecycle_guard import TicketLifecycleGuard
 from src.user.models import Role, User
 from src.user.repository import UserRepository
 from src.user.service import UserService
@@ -63,6 +64,11 @@ async def test_citizen_deactivation_stores_final_anonymized_state(monkeypatch):
     lambda _db, history: histories.append(history),
   )
   monkeypatch.setattr(UserRepository, "add", MagicMock())
+  monkeypatch.setattr(
+    TicketLifecycleGuard,
+    "ensure_user_is_not_required",
+    AsyncMock(),
+  )
   delete_sessions = AsyncMock()
   monkeypatch.setattr(
     AuthRepository,
@@ -104,6 +110,11 @@ async def test_staff_deactivation_keeps_identity(monkeypatch):
     "delete_refresh_tokens_by_user_id",
     AsyncMock(),
   )
+  monkeypatch.setattr(
+    TicketLifecycleGuard,
+    "ensure_user_is_not_required",
+    AsyncMock(),
+  )
 
   await UserService.deactivate_user(
     db,
@@ -132,3 +143,35 @@ async def test_deep_anonymization_uses_only_citizen_history(monkeypatch):
 
   anonymize.assert_awaited_once()
   assert anonymize.await_args.args[0] is db
+
+
+@pytest.mark.asyncio
+async def test_user_with_active_ticket_cannot_be_deactivated(monkeypatch):
+  citizen = make_user(Role.CITIZEN)
+  monkeypatch.setattr(
+    UserRepository,
+    "get_by_id",
+    AsyncMock(return_value=citizen),
+  )
+  guard = AsyncMock(
+    side_effect=ConflictException(
+      "User cannot be deactivated while referenced by an active ticket.",
+      error_code="USER_HAS_ACTIVE_TICKETS",
+    )
+  )
+  monkeypatch.setattr(
+    TicketLifecycleGuard,
+    "ensure_user_is_not_required",
+    guard,
+  )
+
+  with pytest.raises(ConflictException) as error:
+    await UserService.deactivate_user(
+      make_db(),
+      citizen.id,
+      uuid.uuid4(),
+      "Account deletion",
+    )
+
+  assert error.value.error_code == "USER_HAS_ACTIVE_TICKETS"
+  assert citizen.is_active is True

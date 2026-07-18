@@ -53,7 +53,6 @@ class TicketImageService:
       original_filename=image.original_filename,
       mime_type=image.mime_type,
       size_bytes=image.size_bytes,
-      uploaded_by_user_id=image.uploaded_by_user_id,
       uploaded_at=image.uploaded_at,
       is_active=image.is_active,
       is_cover=image.is_cover,
@@ -85,7 +84,7 @@ class TicketImageService:
         "Images cannot be changed after the ticket is completed.",
         error_code="TICKET_COMPLETED",
       )
-    if not await TicketAccessPolicy.can_view_internal(db, ticket, current_user):
+    if not TicketAccessPolicy.can_manage_images(ticket, current_user):
       raise ForbiddenException("The user has no internal access to this ticket")
 
   @staticmethod

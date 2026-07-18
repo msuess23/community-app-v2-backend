@@ -8,6 +8,7 @@ from src.office.models import Office
 from src.office.repository import OfficeRepository
 from src.office.schemas import OfficeCreate, OfficeUpdate
 from src.office.service import OfficeService
+from src.ticket.services.lifecycle_guard import TicketLifecycleGuard
 from src.user.repository import UserRepository
 
 
@@ -99,3 +100,65 @@ async def test_office_with_active_users_cannot_be_deactivated(monkeypatch):
     )
 
   assert error.value.error_code == "OFFICE_HAS_ACTIVE_USERS"
+
+
+@pytest.mark.asyncio
+async def test_office_with_active_tickets_cannot_be_deactivated(monkeypatch):
+  office = make_office()
+  monkeypatch.setattr(
+    OfficeRepository,
+    "get_by_id",
+    AsyncMock(return_value=office),
+  )
+  monkeypatch.setattr(
+    UserRepository,
+    "has_active_users_for_office",
+    AsyncMock(return_value=False),
+  )
+  guard = AsyncMock(
+    side_effect=ConflictException(
+      "Office cannot be deactivated while active tickets are assigned to it.",
+      error_code="OFFICE_HAS_ACTIVE_TICKETS",
+    )
+  )
+  monkeypatch.setattr(
+    TicketLifecycleGuard,
+    "ensure_office_has_no_active_tickets",
+    guard,
+  )
+
+  with pytest.raises(ConflictException) as error:
+    await OfficeService.deactivate_office(
+      make_db(),
+      office.id,
+      uuid.uuid4(),
+      "Office merger",
+    )
+
+  assert error.value.error_code == "OFFICE_HAS_ACTIVE_TICKETS"
+  assert office.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_office_address_can_be_removed_explicitly(monkeypatch):
+  from src.address.models import Address
+
+  office = make_office()
+  office.address = Address(
+    id=uuid.uuid4(),
+    street="Main Street",
+    house_number="1",
+    zip_code="95028",
+    city="Hof",
+  )
+  monkeypatch.setattr(OfficeRepository, "add", MagicMock())
+  monkeypatch.setattr(OfficeRepository, "add_history", MagicMock())
+
+  await OfficeService.update_office(
+    make_db(),
+    office,
+    OfficeUpdate(address=None, change_reason="Address removed"),
+    uuid.uuid4(),
+  )
+
+  assert office.address is None

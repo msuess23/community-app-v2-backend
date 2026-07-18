@@ -133,6 +133,7 @@ async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) 
 
   assert response.is_cover is True
   assert response.is_active is True
+  assert "uploaded_by_user_id" not in response.model_dump()
   assert len(staged) == 1
   assert staged[0].added_event_id == event.id
   assert staged[0].storage_key.endswith("image.jpg")

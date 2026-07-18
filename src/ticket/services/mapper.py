@@ -12,13 +12,14 @@ from src.ticket.domain import (
   TicketWorkflowState,
 )
 from src.ticket.models import Ticket, TicketEvent
+from src.ticket.services.access_policy import TicketAccessPolicy
 from src.ticket.schemas import (
   TicketEventResponse,
   TicketInternalResponse,
   TicketResponse,
   TicketStatusResponse,
 )
-from src.user.models import Role, User
+from src.user.models import User
 
 
 class TicketResponseMapper:
@@ -60,7 +61,6 @@ class TicketResponseMapper:
       id=event.id,
       status=status,
       message=message,
-      created_by_user_id=event.actor_user_id,
       created_at=event.occurred_at,
     )
 
@@ -86,19 +86,10 @@ class TicketResponseMapper:
       active_images[0] if active_images else None,
     )
     can_manage_images = can_edit
-    if current_user is not None and current_user.role in {Role.OFFICER, Role.MANAGER}:
+    if current_user is not None:
       can_manage_images = (
-        ticket.workflow_state != TicketWorkflowState.COMPLETED
-        and (
-          current_user.id in {
-            ticket.primary_officer_id,
-            ticket.current_assignee_id,
-          }
-          or (
-            current_user.office_id is not None
-            and current_user.office_id == ticket.office_id
-          )
-        )
+        can_manage_images
+        or TicketAccessPolicy.can_manage_images(ticket, current_user)
       )
 
     return TicketResponse(
@@ -107,7 +98,6 @@ class TicketResponseMapper:
       description=ticket.description,
       category=ticket.category,
       office_id=ticket.office_id,
-      creator_user_id=ticket.creator_user_id,
       address=(
         AddressResponse.model_validate(ticket.address)
         if ticket.address is not None
@@ -140,12 +130,13 @@ class TicketResponseMapper:
       current_status_event=current_status_event,
       current_user=current_user,
     )
-    public_response.can_manage_images = (
-      current_user.role in {Role.OFFICER, Role.MANAGER}
-      and ticket.workflow_state != TicketWorkflowState.COMPLETED
+    public_response.can_manage_images = TicketAccessPolicy.can_manage_images(
+      ticket,
+      current_user,
     )
     return TicketInternalResponse(
       **public_response.model_dump(),
+      creator_user_id=ticket.creator_user_id,
       workflow_state=ticket.workflow_state,
       primary_officer_id=ticket.primary_officer_id,
       current_assignee_id=ticket.current_assignee_id,

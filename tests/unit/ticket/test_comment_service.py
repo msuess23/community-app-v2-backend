@@ -97,6 +97,7 @@ async def test_external_comment_is_append_only_and_citizen_visible(monkeypatch) 
 
   assert response.text == "The damage became larger"
   assert response.is_internal is False
+  assert "author_user_id" not in response.model_dump()
   assert staged_events[-1].event_type == TicketEventType.TICKET_COMMENTED
   assert ticket.version == 4
 
@@ -138,6 +139,49 @@ async def test_public_comment_list_filters_internal_staff_notes(monkeypatch) -> 
     AsyncMock(),
     ticket.id,
     citizen,
+  )
+
+  assert [comment.text for comment in comments] == ["Public update"]
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_after_routing_sees_only_public_comments(monkeypatch) -> None:
+  citizen = _user(Role.CITIZEN)
+  dispatcher = _user(Role.DISPATCHER)
+  ticket = _ticket(citizen.id)
+  now = datetime.now(timezone.utc)
+  public_event = TicketEvent(
+    id=uuid4(),
+    ticket_id=ticket.id,
+    sequence_number=4,
+    event_type=TicketEventType.TICKET_COMMENTED,
+    actor_user_id=citizen.id,
+    occurred_at=now,
+    payload={"text": "Public update", "is_internal": False},
+  )
+  internal_event = TicketEvent(
+    id=uuid4(),
+    ticket_id=ticket.id,
+    sequence_number=5,
+    event_type=TicketEventType.TICKET_COMMENTED,
+    actor_user_id=uuid4(),
+    occurred_at=now,
+    payload={"text": "Internal note", "is_internal": True},
+  )
+
+  monkeypatch.setattr(
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id",
+    AsyncMock(return_value=ticket),
+  )
+  monkeypatch.setattr(
+    "src.ticket.repositories.event.TicketEventRepository.get_comment_events",
+    AsyncMock(return_value=[public_event, internal_event]),
+  )
+
+  comments = await TicketCommentService.list_comments(
+    AsyncMock(),
+    ticket.id,
+    dispatcher,
   )
 
   assert [comment.text for comment in comments] == ["Public update"]

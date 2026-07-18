@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.core.request_models import StrictRequestModel
+
 from src.ticket.domain import (
   EscalationDecision,
   TicketCompletionOutcome,
@@ -18,7 +20,7 @@ from src.core.validation import normalize_optional_text, normalize_required_text
 from src.ticket.schemas.ticket import TicketInternalResponse
 
 
-class TicketDispatchRequest(BaseModel):
+class TicketDispatchRequest(StrictRequestModel):
   """Dispatcher command that selects the responsible authority."""
 
   office_id: UUID
@@ -30,7 +32,7 @@ class TicketDispatchRequest(BaseModel):
     return normalize_optional_text(value)
 
 
-class PrimaryOfficerAssignmentRequest(BaseModel):
+class PrimaryOfficerAssignmentRequest(StrictRequestModel):
   """Manager command that selects the permanent case owner."""
 
   primary_officer_id: UUID
@@ -42,7 +44,7 @@ class PrimaryOfficerAssignmentRequest(BaseModel):
     return normalize_optional_text(value)
 
 
-class ForwardTicketAction(BaseModel):
+class ForwardTicketAction(StrictRequestModel):
   """Transfers current coordination to another staff member."""
 
   action: Literal[TicketWorkflowAction.FORWARD]
@@ -55,7 +57,7 @@ class ForwardTicketAction(BaseModel):
     return normalize_optional_text(value)
 
 
-class RequestCosignatureAction(BaseModel):
+class RequestCosignatureAction(StrictRequestModel):
   """Temporarily sends the ticket to one selected cosigner."""
 
   action: Literal[TicketWorkflowAction.REQUEST_COSIGNATURE]
@@ -68,7 +70,7 @@ class RequestCosignatureAction(BaseModel):
     return normalize_optional_text(value)
 
 
-class CosignTicketAction(BaseModel):
+class CosignTicketAction(StrictRequestModel):
   """Records the requested cosignature and returns the case."""
 
   action: Literal[TicketWorkflowAction.COSIGN]
@@ -80,7 +82,7 @@ class CosignTicketAction(BaseModel):
     return normalize_optional_text(value)
 
 
-class EscalateTicketAction(BaseModel):
+class EscalateTicketAction(StrictRequestModel):
   """Requests a decision from one active manager."""
 
   action: Literal[TicketWorkflowAction.ESCALATE]
@@ -93,7 +95,7 @@ class EscalateTicketAction(BaseModel):
     return normalize_required_text(value)
 
 
-class DecideEscalationAction(BaseModel):
+class DecideEscalationAction(StrictRequestModel):
   """Approves or rejects the currently pending escalation."""
 
   action: Literal[TicketWorkflowAction.DECIDE_ESCALATION]
@@ -106,7 +108,7 @@ class DecideEscalationAction(BaseModel):
     return normalize_optional_text(value)
 
 
-class RequestCitizenResponseAction(BaseModel):
+class RequestCitizenResponseAction(StrictRequestModel):
   """Pauses staff processing until the citizen answers a question."""
 
   action: Literal[TicketWorkflowAction.REQUEST_CITIZEN_RESPONSE]
@@ -118,7 +120,7 @@ class RequestCitizenResponseAction(BaseModel):
     return normalize_required_text(value)
 
 
-class CompleteTicketAction(BaseModel):
+class CompleteTicketAction(StrictRequestModel):
   """Completes a ticket with a resolved or rejected public outcome."""
 
   action: Literal[TicketWorkflowAction.COMPLETE]
@@ -161,7 +163,7 @@ class TicketInternalDetailResponse(TicketInternalResponse):
   allowed_actions: list[TicketWorkflowAction] = Field(default_factory=list)
 
 
-class TicketCitizenResponseRequest(BaseModel):
+class TicketCitizenResponseRequest(StrictRequestModel):
   """Citizen answer to the currently pending authority question."""
 
   message: str = Field(..., min_length=1, max_length=2000)

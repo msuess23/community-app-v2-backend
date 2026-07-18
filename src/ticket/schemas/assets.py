@@ -7,10 +7,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.core.request_models import StrictRequestModel
 from src.core.validation import normalize_optional_text, normalize_required_text
 
 
-class TicketCommentCreateRequest(BaseModel):
+class TicketCommentCreateRequest(StrictRequestModel):
   """Create one immutable ticket comment event."""
 
   text: str = Field(..., min_length=1, max_length=2000)
@@ -31,7 +32,6 @@ class TicketCommentResponse(BaseModel):
   ticket_id: UUID
   text: str
   is_internal: bool
-  author_user_id: UUID
   created_at: datetime
 
 
@@ -44,14 +44,13 @@ class TicketImageResponse(BaseModel):
   original_filename: str
   mime_type: str
   size_bytes: int
-  uploaded_by_user_id: UUID
   uploaded_at: datetime
   is_active: bool
   is_cover: bool
   removed_at: datetime | None = None
 
 
-class TicketImageRemoveRequest(BaseModel):
+class TicketImageRemoveRequest(StrictRequestModel):
   """Optional explanation recorded with an image-removal event."""
 
   reason: str | None = Field(None, max_length=500)

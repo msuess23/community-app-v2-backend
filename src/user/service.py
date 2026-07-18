@@ -16,6 +16,7 @@ from src.core.filters import LifecycleStatusFilter, SortOrder
 from src.core.schemas import PaginatedResponse
 from src.core.security import get_password_hash
 from src.office.repository import OfficeRepository
+from src.ticket.services.lifecycle_guard import TicketLifecycleGuard
 from src.user.models import Role, User, UserHistory, UserSortField
 from src.user.repository import UserRepository
 from src.user.schemas import AdminUserUpdate, UserUpdate
@@ -132,6 +133,16 @@ class UserService:
       update_dict["role"] = resulting_role
       update_dict["office_id"] = resulting_office_id
       change_reason = update_data.change_reason
+
+      role_or_office_changes = (
+        resulting_role != user.role or resulting_office_id != user.office_id
+      )
+      if role_or_office_changes:
+        await TicketLifecycleGuard.ensure_user_is_not_required(
+          db,
+          user.id,
+          operation="reassigned",
+        )
     else:
       update_dict = update_data.model_dump(exclude_unset=True)
       change_reason = "Profile updated by user"
@@ -225,6 +236,12 @@ class UserService:
         "User is already deactivated",
         error_code="USER_ALREADY_DEACTIVATED",
       )
+
+    await TicketLifecycleGuard.ensure_user_is_not_required(
+      db,
+      user.id,
+      operation="deactivated",
+    )
 
     user.is_active = False
     user.deactivated_at = datetime.now(timezone.utc)

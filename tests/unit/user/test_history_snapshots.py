@@ -1,10 +1,9 @@
-import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.auth.service import AuthService
-from src.user.models import Role, User
+from src.user.models import Role
 from src.user.repository import UserRepository
 from src.user.schemas import UserCreate
 

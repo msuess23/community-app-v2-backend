@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from src.core.request_models import StrictRequestModel
+
 
 def _normalize_required(value: str) -> str:
   normalized = " ".join(value.split())
@@ -11,7 +13,7 @@ def _normalize_required(value: str) -> str:
   return normalized
 
 
-class AddressCreate(BaseModel):
+class AddressCreate(StrictRequestModel):
   """Creates an independent address record owned by another aggregate."""
 
   street: str = Field(..., min_length=2, max_length=150)
@@ -27,7 +29,7 @@ class AddressCreate(BaseModel):
     return _normalize_required(value)
 
 
-class AddressUpdate(BaseModel):
+class AddressUpdate(StrictRequestModel):
   """Partially updates an address record."""
 
   street: Optional[str] = Field(None, min_length=2, max_length=150)
@@ -36,6 +38,13 @@ class AddressUpdate(BaseModel):
   city: Optional[str] = Field(None, min_length=2, max_length=100)
   latitude: Optional[float] = Field(None, ge=-90.0, le=90.0)
   longitude: Optional[float] = Field(None, ge=-180.0, le=180.0)
+
+  @field_validator("street", "house_number", "zip_code", "city", mode="before")
+  @classmethod
+  def reject_null_required_fields(cls, value: object) -> object:
+    if value is None:
+      raise ValueError("address text fields cannot be null")
+    return value
 
   @field_validator("street", "house_number", "zip_code", "city")
   @classmethod

@@ -15,6 +15,7 @@ from src.core.schemas import PaginatedResponse
 from src.office.models import Office, OfficeHistory, OfficeSortField
 from src.office.repository import OfficeRepository
 from src.office.schemas import OfficeCreate, OfficeUpdate
+from src.ticket.services.lifecycle_guard import TicketLifecycleGuard
 from src.user.models import Role, User
 from src.user.repository import UserRepository
 
@@ -170,15 +171,22 @@ class OfficeService:
       for key, value in raw_update.items()
       if getattr(office, key) != value
     }
-    address_changes = (
-      update_data.address is not None
-      and bool(update_data.address.model_dump(exclude_unset=True))
-    )
+    address_was_supplied = "address" in update_data.model_fields_set
+    address_changes = False
+    if address_was_supplied:
+      if update_data.address is None:
+        address_changes = office.address is not None
+      else:
+        address_changes = bool(update_data.address.model_dump(exclude_unset=True))
+
     if not effective_changes and not address_changes:
       return office
 
-    if address_changes:
-      if office.address:
+    if address_was_supplied:
+      if update_data.address is None:
+        # Replacing the owned relationship lets delete-orphan remove the old row.
+        office.address = None
+      elif office.address:
         AddressService.update_address_entity(office.address, update_data.address)
       else:
         office.address = AddressService.create_address_from_update(update_data.address)
@@ -222,6 +230,8 @@ class OfficeService:
         "Office cannot be deactivated while active users are assigned to it.",
         error_code="OFFICE_HAS_ACTIVE_USERS",
       )
+
+    await TicketLifecycleGuard.ensure_office_has_no_active_tickets(db, office.id)
 
     office.is_active = False
     office.deactivated_at = datetime.now(timezone.utc)

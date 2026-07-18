@@ -5,11 +5,13 @@ import pytest
 from pydantic import ValidationError
 
 from src.core.exceptions import (
+  ConflictException,
   DomainValidationException,
   ForbiddenException,
 )
 from src.office.models import Office
 from src.office.repository import OfficeRepository
+from src.ticket.services.lifecycle_guard import TicketLifecycleGuard
 from src.user.models import Role, User
 from src.user.repository import UserRepository
 from src.user.schemas import AdminUserUpdate, UserCreate
@@ -82,6 +84,11 @@ async def test_admin_can_promote_citizen_to_officer_with_active_office(monkeypat
     lambda _db, history: histories.append(history),
   )
   monkeypatch.setattr(UserRepository, "add", MagicMock())
+  monkeypatch.setattr(
+    TicketLifecycleGuard,
+    "ensure_user_is_not_required",
+    AsyncMock(),
+  )
 
   result = await UserService.update_user_profile(
     db,
@@ -161,6 +168,11 @@ async def test_switching_to_admin_clears_office(monkeypatch):
   manager = make_user(Role.MANAGER, office_id=office_id)
   monkeypatch.setattr(UserRepository, "add_history", MagicMock())
   monkeypatch.setattr(UserRepository, "add", MagicMock())
+  monkeypatch.setattr(
+    TicketLifecycleGuard,
+    "ensure_user_is_not_required",
+    AsyncMock(),
+  )
 
   await UserService.update_user_profile(
     make_db(),
@@ -200,3 +212,39 @@ async def test_inactive_office_cannot_be_assigned(monkeypatch):
     )
 
   assert error.value.error_code == "OFFICE_INACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_role_or_office_change_is_blocked_for_active_ticket_participant(monkeypatch):
+  office = make_office()
+  officer = make_user(Role.OFFICER, office_id=office.id)
+  monkeypatch.setattr(
+    OfficeRepository,
+    "get_by_id",
+    AsyncMock(return_value=office),
+  )
+  guard = AsyncMock(
+    side_effect=ConflictException(
+      "User cannot be reassigned while referenced by an active ticket.",
+      error_code="USER_HAS_ACTIVE_TICKETS",
+    )
+  )
+  monkeypatch.setattr(
+    TicketLifecycleGuard,
+    "ensure_user_is_not_required",
+    guard,
+  )
+
+  with pytest.raises(ConflictException) as error:
+    await UserService.update_user_profile(
+      make_db(),
+      officer,
+      AdminUserUpdate(
+        role=Role.MANAGER,
+        office_id=office.id,
+        change_reason="Role change",
+      ),
+      uuid.uuid4(),
+    )
+
+  assert error.value.error_code == "USER_HAS_ACTIVE_TICKETS"

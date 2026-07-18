@@ -35,7 +35,6 @@ class TicketCommentService:
       ticket_id=event.ticket_id,
       text=payload.text,
       is_internal=payload.is_internal,
-      author_user_id=event.actor_user_id,
       created_at=event.occurred_at,
     )
 
@@ -105,12 +104,14 @@ class TicketCommentService:
         ticket,
         current_user,
       )
-      if not include_internal:
-        raise ResourceNotFoundException(
-          "Ticket not found",
-          error_code="TICKET_NOT_FOUND",
-        )
-    elif not await TicketAccessPolicy.can_view(db, ticket, current_user):
+
+    # A signed-in staff user without internal access retains the same public
+    # visibility as an anonymous caller, but never receives internal notes.
+    if not include_internal and not await TicketAccessPolicy.can_view(
+      db,
+      ticket,
+      current_user,
+    ):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
 
     events = await TicketEventRepository.get_comment_events(db, ticket.id)

@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.core.filters import LifecycleStatusFilter
-from src.office.models import Office
 from src.office.repository import OfficeRepository
 from src.office.schemas import OfficeCreate
 from src.office.service import OfficeService

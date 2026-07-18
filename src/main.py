@@ -7,10 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-import src.auth.models
-import src.office.models
-import src.ticket.models
-import src.user.models
+# Import ORM modules explicitly so SQLAlchemy registers every mapped table.
+import src.auth.models  # noqa: F401
+import src.office.models  # noqa: F401
+import src.ticket.models  # noqa: F401
+import src.user.models  # noqa: F401
+
 from scripts.seed.run_seed import seed_database
 from src.auth.router import router as auth_router
 from src.core.config import settings

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, Tuple
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, exists, false, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -67,6 +67,43 @@ class TicketProjectionRepository:
       .with_for_update()
     )
     return result.scalar_one_or_none()
+
+
+  @staticmethod
+  async def has_active_user_dependency(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+  ) -> bool:
+    """Return whether an unfinished ticket still depends on one user."""
+
+    dependency = or_(
+      Ticket.creator_user_id == user_id,
+      Ticket.primary_officer_id == user_id,
+      Ticket.current_assignee_id == user_id,
+      Ticket.return_to_user_id == user_id,
+    )
+    query = select(
+      exists().where(
+        Ticket.workflow_state != TicketWorkflowState.COMPLETED,
+        dependency,
+      )
+    )
+    return bool((await db.execute(query)).scalar_one())
+
+  @staticmethod
+  async def has_active_tickets_for_office(
+    db: AsyncSession,
+    office_id: uuid.UUID,
+  ) -> bool:
+    """Return whether an office owns at least one unfinished ticket."""
+
+    query = select(
+      exists().where(
+        Ticket.office_id == office_id,
+        Ticket.workflow_state != TicketWorkflowState.COMPLETED,
+      )
+    )
+    return bool((await db.execute(query)).scalar_one())
 
   @staticmethod
   async def get_public_page(
@@ -161,6 +198,44 @@ class TicketProjectionRepository:
     result = await db.execute(query)
     return list(result.scalars().unique().all()), total
 
+
+  @staticmethod
+  def _staff_scope(current_user: User):
+    """Build the role-scoped predicate used by the authority work queue."""
+
+    if current_user.role == Role.DISPATCHER:
+      return Ticket.workflow_state.in_(
+        {
+          TicketWorkflowState.NEW,
+          TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
+        }
+      )
+
+    active_ticket = Ticket.workflow_state != TicketWorkflowState.COMPLETED
+    if current_user.role == Role.MANAGER:
+      return and_(
+        active_ticket,
+        or_(
+          Ticket.office_id == current_user.office_id,
+          Ticket.primary_officer_id == current_user.id,
+          Ticket.current_assignee_id == current_user.id,
+          Ticket.return_to_user_id == current_user.id,
+        ),
+      )
+
+    if current_user.role == Role.OFFICER:
+      return and_(
+        active_ticket,
+        or_(
+          Ticket.primary_officer_id == current_user.id,
+          Ticket.current_assignee_id == current_user.id,
+          Ticket.return_to_user_id == current_user.id,
+        ),
+      )
+
+    # Defensive fallback for accidental direct repository use.
+    return false()
+
   @staticmethod
   async def get_staff_page(
     db: AsyncSession,
@@ -178,44 +253,18 @@ class TicketProjectionRepository:
     """Returns a role-scoped work queue for the administrative client.
 
     Dispatchers see the central routing queue. Managers see active tickets of
-    their office as well as cross-office tasks assigned to them. Officers see
-    tickets they own, coordinate, or have an open parallel task for.
+    their office as well as cross-office assignments. Officers see tickets
+    they own, currently process, or must receive back after a temporary step.
     """
 
-    query = select(Ticket).options(
+    query = (
+      select(Ticket)
+      .options(
         selectinload(Ticket.address),
         selectinload(Ticket.images),
       )
-    if current_user.role == Role.DISPATCHER:
-      query = query.where(
-        Ticket.workflow_state.in_(
-          {
-            TicketWorkflowState.NEW,
-            TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
-          }
-        )
-      )
-    elif current_user.role == Role.MANAGER:
-      query = query.where(
-        Ticket.workflow_state != TicketWorkflowState.COMPLETED,
-        or_(
-          Ticket.office_id == current_user.office_id,
-          Ticket.primary_officer_id == current_user.id,
-          Ticket.current_assignee_id == current_user.id,
-        ),
-      )
-    elif current_user.role == Role.OFFICER:
-      query = query.where(
-        Ticket.workflow_state != TicketWorkflowState.COMPLETED,
-        or_(
-          Ticket.primary_officer_id == current_user.id,
-          Ticket.current_assignee_id == current_user.id,
-        ),
-      )
-    else:
-      # The service blocks this branch, but the defensive false predicate keeps
-      # accidental direct repository use from exposing authority-side data.
-      query = query.where(Ticket.id.is_(None))
+      .where(TicketProjectionRepository._staff_scope(current_user))
+    )
 
     query = apply_search_filter(query, search, Ticket.title, Ticket.description)
     if workflow_state is not None:
