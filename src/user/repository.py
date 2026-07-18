@@ -12,6 +12,7 @@ from src.core.filters import (
   apply_lifecycle_filter,
   apply_search_filter,
 )
+from src.core.pagination import execute_page
 from src.user.models import Role, User, UserHistory, UserSortField
 
 
@@ -73,16 +74,15 @@ class UserRepository:
     if force_office_id:
       query = query.where(User.office_id == force_office_id)
 
-    count_query = select(func.count()).select_from(query.order_by(None).subquery())
-    total = int((await db.execute(count_query)).scalar_one())
-
-    sort_column = UserRepository.SORT_COLUMNS[sort_by]
-    ordering = sort_column.desc() if order == SortOrder.DESC else sort_column.asc()
-    query = query.order_by(ordering, User.id.asc())
-    query = query.offset((page - 1) * size).limit(size)
-
-    result = await db.execute(query)
-    return list(result.scalars().all()), total
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=UserRepository.SORT_COLUMNS[sort_by],
+      order=order,
+      tie_breaker=User.id,
+    )
 
   @staticmethod
   async def has_active_users_for_office(
@@ -139,12 +139,15 @@ class UserRepository:
     await db.execute(stmt)
 
   @staticmethod
-  async def get_history_by_user_id(
+  async def get_history_page(
     db: AsyncSession,
     user_id: uuid.UUID,
+    *,
+    page: int,
+    size: int,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-  ) -> list[UserHistory]:
+  ) -> tuple[list[UserHistory], int]:
     query = select(UserHistory).where(UserHistory.user_id == user_id)
 
     if start_date:
@@ -152,7 +155,12 @@ class UserRepository:
     if end_date:
       query = query.where(UserHistory.changed_at <= end_date)
 
-    result = await db.execute(
-      query.order_by(UserHistory.changed_at.desc(), UserHistory.id.desc())
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=UserHistory.changed_at,
+      order=SortOrder.DESC,
+      tie_breaker=UserHistory.id,
     )
-    return list(result.scalars().all())

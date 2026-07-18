@@ -151,7 +151,7 @@ async def test_auth_user_office_and_history_flow(monkeypatch):
         )
         assert user_history.status_code == 200
         history_reasons = [
-          entry["change_reason"] for entry in user_history.json()
+          entry["change_reason"] for entry in user_history.json()["data"]
         ]
         assert len(history_reasons) == 2
         assert set(history_reasons) == {
@@ -164,7 +164,7 @@ async def test_auth_user_office_and_history_flow(monkeypatch):
           headers=admin_headers,
         )
         assert office_history.status_code == 200
-        assert office_history.json()[0]["change_reason"] == "OFFICE_CREATED"
+        assert office_history.json()["data"][0]["change_reason"] == "OFFICE_CREATED"
 
         blocked_delete = await client.request(
           "DELETE",

@@ -27,9 +27,7 @@ from src.ticket.services.access_policy import TicketAccessPolicy
 from src.ticket.services.mapper import TicketResponseMapper
 from src.ticket.services.timeline import latest_status_events
 from src.user.models import Role, User
-
-
-STAFF_ROLES = {Role.OFFICER, Role.MANAGER}
+from src.user.roles import AUTHORITY_ROLES, CASE_WORKER_ROLES
 
 
 class TicketWorkflowQueryService:
@@ -57,7 +55,7 @@ class TicketWorkflowQueryService:
       actions.append(TicketWorkflowAction.ASSIGN_PRIMARY_OFFICER)
 
     is_assignee = (
-      current_user.role in STAFF_ROLES
+      current_user.role in CASE_WORKER_ROLES
       and ticket.current_assignee_id == current_user.id
     )
     if is_assignee and ticket.workflow_state == TicketWorkflowState.IN_PROGRESS:
@@ -123,7 +121,7 @@ class TicketWorkflowQueryService:
   ) -> PaginatedResponse[TicketInternalResponse]:
     """List the role-scoped administrative work queue."""
 
-    if current_user.role not in {Role.DISPATCHER, Role.OFFICER, Role.MANAGER}:
+    if current_user.role not in AUTHORITY_ROLES:
       raise ForbiddenException("This account has no ticket work queue")
 
     tickets, total = await TicketProjectionRepository.get_staff_page(
@@ -160,9 +158,7 @@ class TicketWorkflowQueryService:
     """Return the workflow projection and available actions."""
 
     ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
-    if ticket is None or not await TicketAccessPolicy.can_view_internal(
-      db, ticket, current_user
-    ):
+    if ticket is None or not TicketAccessPolicy.can_view_internal(ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
     return await TicketWorkflowQueryService.internal_detail_response(
       db, ticket, current_user
@@ -173,15 +169,24 @@ class TicketWorkflowQueryService:
     db: AsyncSession,
     ticket_id: uuid.UUID,
     current_user: User,
-  ) -> list[TicketEventResponse]:
-    """Return the complete chronological event stream to authorized staff."""
+    *,
+    page: int,
+    size: int,
+  ) -> PaginatedResponse[TicketEventResponse]:
+    """Return a chronological page of events to authorized staff."""
 
     ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
-    if ticket is None or not await TicketAccessPolicy.can_view_internal(
-      db, ticket, current_user
-    ):
+    if ticket is None or not TicketAccessPolicy.can_view_internal(ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
-    return [
-      TicketResponseMapper.to_event(event)
-      for event in await TicketEventRepository.get_events(db, ticket.id)
-    ]
+    events, total = await TicketEventRepository.get_event_page(
+      db,
+      ticket.id,
+      page=page,
+      size=size,
+    )
+    return PaginatedResponse.create(
+      data=[TicketResponseMapper.to_event(event) for event in events],
+      total=total,
+      page=page,
+      size=size,
+    )

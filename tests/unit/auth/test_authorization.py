@@ -1,6 +1,6 @@
 import uuid
 
-from src.auth.dependencies import can_access_user
+from src.user.access_policy import UserAccessPolicy
 from src.user.models import Role, User
 
 
@@ -26,8 +26,8 @@ def test_citizen_can_only_access_self():
   citizen = make_user(Role.CITIZEN)
   other = make_user(Role.CITIZEN)
 
-  assert can_access_user(citizen, citizen) is True
-  assert can_access_user(citizen, other) is False
+  assert UserAccessPolicy.can_access(citizen, citizen) is True
+  assert UserAccessPolicy.can_access(citizen, other) is False
 
 
 def test_officer_and_manager_are_limited_to_active_staff_in_own_office():
@@ -40,19 +40,19 @@ def test_officer_and_manager_are_limited_to_active_staff_in_own_office():
   citizen = make_user(Role.CITIZEN, office_id=office_id)
   inactive_colleague = make_user(Role.OFFICER, office_id=office_id, active=False)
 
-  assert can_access_user(officer, colleague) is True
-  assert can_access_user(manager, colleague) is True
-  assert can_access_user(officer, foreign_colleague) is False
-  assert can_access_user(officer, citizen) is False
-  assert can_access_user(officer, inactive_colleague) is False
+  assert UserAccessPolicy.can_access(officer, colleague) is True
+  assert UserAccessPolicy.can_access(manager, colleague) is True
+  assert UserAccessPolicy.can_access(officer, foreign_colleague) is False
+  assert UserAccessPolicy.can_access(officer, citizen) is False
+  assert UserAccessPolicy.can_access(officer, inactive_colleague) is False
 
 
 def test_dispatcher_sees_active_staff_but_not_citizens():
   dispatcher = make_user(Role.DISPATCHER, office_id=uuid.uuid4())
 
-  assert can_access_user(dispatcher, make_user(Role.OFFICER)) is True
-  assert can_access_user(dispatcher, make_user(Role.CITIZEN)) is False
-  assert can_access_user(
+  assert UserAccessPolicy.can_access(dispatcher, make_user(Role.OFFICER)) is True
+  assert UserAccessPolicy.can_access(dispatcher, make_user(Role.CITIZEN)) is False
+  assert UserAccessPolicy.can_access(
     dispatcher,
     make_user(Role.MANAGER, active=False),
   ) is False
@@ -60,5 +60,5 @@ def test_dispatcher_sees_active_staff_but_not_citizens():
 
 def test_admin_can_access_all_users():
   admin = make_user(Role.ADMIN)
-  assert can_access_user(admin, make_user(Role.CITIZEN)) is True
-  assert can_access_user(admin, make_user(Role.OFFICER, active=False)) is True
+  assert UserAccessPolicy.can_access(admin, make_user(Role.CITIZEN)) is True
+  assert UserAccessPolicy.can_access(admin, make_user(Role.OFFICER, active=False)) is True

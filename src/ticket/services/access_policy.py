@@ -1,21 +1,31 @@
-"""Centralized ticket authorization rules shared by all use cases."""
+"""Centralized ticket authorization and capability calculation."""
 
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from dataclasses import dataclass
 
 from src.ticket.domain import TicketVisibility, TicketWorkflowState
 from src.ticket.models import Ticket
 from src.user.models import Role, User
+from src.user.roles import CASE_WORKER_ROLES
 
 
-CASE_WORKER_ROLES = frozenset({Role.OFFICER, Role.MANAGER})
 ROUTING_STATES = frozenset(
   {
     TicketWorkflowState.NEW,
     TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
   }
 )
+
+
+@dataclass(frozen=True)
+class TicketCapabilities:
+  """Actions exposed by a ticket response and enforced by command services."""
+
+  can_edit: bool = False
+  can_manage_images: bool = False
+  can_comment: bool = False
+  can_view_internal: bool = False
 
 
 class TicketAccessPolicy:
@@ -50,44 +60,53 @@ class TicketAccessPolicy:
     )
 
   @staticmethod
-  async def can_view(
-    db: AsyncSession,
-    ticket: Ticket,
-    current_user: User | None,
-  ) -> bool:
+  def can_view(ticket: Ticket, current_user: User | None) -> bool:
     """Check whether a caller may see the citizen-facing representation."""
 
-    del db
     if ticket.visibility == TicketVisibility.PUBLIC:
       return True
     if current_user is None:
       return False
     if current_user.id == ticket.creator_user_id:
       return True
+    return TicketAccessPolicy.can_view_internal(ticket, current_user)
+
+  @staticmethod
+  def can_view_internal(ticket: Ticket, current_user: User) -> bool:
+    """Check access to internal workflow data without granting admin access."""
+
     return (
       TicketAccessPolicy.is_dispatcher_routing_ticket(ticket, current_user)
       or TicketAccessPolicy.is_case_worker_participant(ticket, current_user)
     )
 
   @staticmethod
-  async def can_view_internal(
-    db: AsyncSession,
-    ticket: Ticket,
-    current_user: User,
-  ) -> bool:
-    """Check access to internal workflow data without granting admin access."""
+  def capabilities(ticket: Ticket, current_user: User | None) -> TicketCapabilities:
+    """Calculate response flags from the same rules used by commands."""
 
-    del db
-    return (
-      TicketAccessPolicy.is_dispatcher_routing_ticket(ticket, current_user)
-      or TicketAccessPolicy.is_case_worker_participant(ticket, current_user)
+    if current_user is None:
+      return TicketCapabilities()
+
+    is_creator = current_user.id == ticket.creator_user_id
+    can_edit = is_creator and ticket.workflow_state == TicketWorkflowState.NEW
+    can_view_internal = TicketAccessPolicy.can_view_internal(ticket, current_user)
+    can_manage_images = can_edit or (
+      current_user.role in CASE_WORKER_ROLES
+      and can_view_internal
+      and ticket.workflow_state != TicketWorkflowState.COMPLETED
+    )
+    can_comment = (
+      is_creator and ticket.workflow_state != TicketWorkflowState.COMPLETED
+    ) or can_view_internal
+    return TicketCapabilities(
+      can_edit=can_edit,
+      can_manage_images=can_manage_images,
+      can_comment=can_comment,
+      can_view_internal=can_view_internal,
     )
 
   @staticmethod
   def can_manage_images(ticket: Ticket, current_user: User) -> bool:
-    """Return whether authority staff may change the current image projection."""
+    """Return whether the caller may change the current image projection."""
 
-    return (
-      ticket.workflow_state != TicketWorkflowState.COMPLETED
-      and TicketAccessPolicy.is_case_worker_participant(ticket, current_user)
-    )
+    return TicketAccessPolicy.capabilities(ticket, current_user).can_manage_images

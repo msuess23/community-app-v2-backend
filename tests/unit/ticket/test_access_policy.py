@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-import pytest
 from sqlalchemy.dialects import postgresql
 
 from src.ticket.domain import (
@@ -44,22 +43,18 @@ def _ticket(state: TicketWorkflowState, *, office_id=None) -> Ticket:
   )
 
 
-@pytest.mark.asyncio
-async def test_dispatcher_internal_access_is_limited_to_routing_states() -> None:
+def test_dispatcher_internal_access_is_limited_to_routing_states() -> None:
   dispatcher = _user(Role.DISPATCHER)
 
-  assert await TicketAccessPolicy.can_view_internal(
-    None,
+  assert TicketAccessPolicy.can_view_internal(
     _ticket(TicketWorkflowState.NEW),
     dispatcher,
   )
-  assert await TicketAccessPolicy.can_view_internal(
-    None,
+  assert TicketAccessPolicy.can_view_internal(
     _ticket(TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT),
     dispatcher,
   )
-  assert not await TicketAccessPolicy.can_view_internal(
-    None,
+  assert not TicketAccessPolicy.can_view_internal(
     _ticket(TicketWorkflowState.IN_PROGRESS),
     dispatcher,
   )
@@ -76,3 +71,25 @@ def test_staff_queue_scope_includes_return_target() -> None:
   )
 
   assert "return_to_user_id" in sql
+
+
+def test_capabilities_use_the_same_owner_and_staff_rules() -> None:
+  citizen = _user(Role.CITIZEN)
+  ticket = _ticket(TicketWorkflowState.NEW)
+  ticket.creator_user_id = citizen.id
+
+  citizen_capabilities = TicketAccessPolicy.capabilities(ticket, citizen)
+  assert citizen_capabilities.can_edit is True
+  assert citizen_capabilities.can_manage_images is True
+  assert citizen_capabilities.can_comment is True
+  assert citizen_capabilities.can_view_internal is False
+
+  officer = _user(Role.OFFICER, office_id=uuid4())
+  ticket.office_id = officer.office_id
+  ticket.workflow_state = TicketWorkflowState.IN_PROGRESS
+  staff_capabilities = TicketAccessPolicy.capabilities(ticket, officer)
+
+  assert staff_capabilities.can_edit is False
+  assert staff_capabilities.can_manage_images is True
+  assert staff_capabilities.can_comment is True
+  assert staff_capabilities.can_view_internal is True

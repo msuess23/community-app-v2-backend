@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, Query, status
@@ -8,6 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.dependencies import get_optional_current_user, role_required
 from src.core.database import get_db
 from src.core.filters import LifecycleStatusFilter, SortOrder, get_bbox_filter
+from src.core.query_params import (
+  DateRangeParams,
+  PageParams,
+  SearchParams,
+  get_history_date_range,
+  get_page_params,
+  get_search_params,
+)
 from src.core.schemas import PaginatedResponse
 from src.office.models import OfficeSortField
 from src.office.schemas import (
@@ -26,31 +33,27 @@ router = APIRouter()
 
 @router.get("", response_model=PaginatedResponse[OfficeResponse])
 async def get_all_offices(
-  q: Optional[str] = Query(
-    None,
-    max_length=200,
-    description="Search term for name, description or contact email",
-  ),
   bbox: Optional[Tuple[float, float, float, float]] = Depends(get_bbox_filter),
   status_filter: LifecycleStatusFilter = Query(
     LifecycleStatusFilter.ACTIVE,
     alias="status",
   ),
-  page: int = Query(1, ge=1),
-  size: int = Query(20, ge=1, le=100),
   sort_by: OfficeSortField = OfficeSortField.NAME,
   order: SortOrder = SortOrder.ASC,
+  page_params: PageParams = Depends(get_page_params),
+  search_params: SearchParams = Depends(get_search_params),
   db: AsyncSession = Depends(get_db),
   current_user: User | None = Depends(get_optional_current_user),
 ):
-  """Lists offices; only admins may include inactive lifecycle states."""
+  """List offices; only administrators may request inactive records."""
+
   return await OfficeService.get_all_offices(
     db,
     current_user=current_user,
-    page=page,
-    size=size,
+    page=page_params.page,
+    size=page_params.size,
     status=status_filter,
-    search=q,
+    search=search_params.q,
     bbox=bbox,
     sort_by=sort_by,
     order=order,
@@ -115,12 +118,22 @@ async def deactivate_office(
   )
 
 
-@router.get("/{office_id}/history", response_model=list[OfficeHistoryResponse])
+@router.get(
+  "/{office_id}/history",
+  response_model=PaginatedResponse[OfficeHistoryResponse],
+)
 async def get_office_history(
   office_id: uuid.UUID,
-  start_date: Optional[datetime] = Query(None),
-  end_date: Optional[datetime] = Query(None),
+  page_params: PageParams = Depends(get_page_params),
+  date_range: DateRangeParams = Depends(get_history_date_range),
   db: AsyncSession = Depends(get_db),
   _current_user: User = Depends(role_required(Role.ADMIN)),
 ):
-  return await OfficeService.get_office_history(db, office_id, start_date, end_date)
+  return await OfficeService.get_office_history(
+    db,
+    office_id,
+    page=page_params.page,
+    size=page_params.size,
+    start_date=date_range.start,
+    end_date=date_range.end,
+  )

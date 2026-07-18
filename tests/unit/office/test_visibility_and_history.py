@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.core.exceptions import DomainValidationException
 from src.core.filters import LifecycleStatusFilter
 from src.office.repository import OfficeRepository
 from src.office.schemas import OfficeCreate
@@ -23,17 +24,19 @@ def make_user(role: Role) -> User:
 
 
 @pytest.mark.asyncio
-async def test_non_admin_office_list_forces_active_status(monkeypatch):
+async def test_non_admin_office_list_rejects_inactive_filter(monkeypatch):
   get_page = AsyncMock(return_value=([], 0))
   monkeypatch.setattr(OfficeRepository, "get_page", get_page)
 
-  await OfficeService.get_all_offices(
-    MagicMock(),
-    current_user=make_user(Role.OFFICER),
-    status=LifecycleStatusFilter.ALL,
-  )
+  with pytest.raises(DomainValidationException) as exc_info:
+    await OfficeService.get_all_offices(
+      MagicMock(),
+      current_user=make_user(Role.OFFICER),
+      status=LifecycleStatusFilter.ALL,
+    )
 
-  assert get_page.await_args.kwargs["status"] == LifecycleStatusFilter.ACTIVE
+  assert exc_info.value.error_code == "LIFECYCLE_FILTER_NOT_ALLOWED"
+  get_page.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -74,6 +77,7 @@ async def test_office_create_adds_initial_snapshot(monkeypatch):
   assert histories[0].is_active is True
   assert histories[0].change_reason == "OFFICE_CREATED"
   assert histories[0].changed_by_user_id == admin_id
+  assert histories[0].address_snapshot is None
 
 
 def test_address_has_no_office_back_reference():

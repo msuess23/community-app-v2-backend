@@ -6,19 +6,23 @@ import uuid
 from datetime import datetime
 from typing import Optional, Tuple
 
-from sqlalchemy import and_, exists, false, func, or_
+from sqlalchemy import and_, exists, false, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from src.address.models import Address
 from src.core.filters import SortOrder, apply_bbox_filter, apply_search_filter
+from src.core.pagination import execute_page
 from src.ticket.domain import (
-  TicketCategory, TicketStatus, TicketVisibility,
+  TicketCategory,
+  TicketStatus,
+  TicketVisibility,
   TicketWorkflowState,
 )
 from src.ticket.models import Ticket, TicketSortField
 from src.user.models import Role, User
+
 
 class TicketProjectionRepository:
   """Persists and queries the current ticket read model."""
@@ -37,16 +41,18 @@ class TicketProjectionRepository:
     db.add(ticket)
 
   @staticmethod
+  def _detail_query():
+    return select(Ticket).options(
+      selectinload(Ticket.address),
+      selectinload(Ticket.images),
+    )
+
+  @staticmethod
   async def get_by_id(db: AsyncSession, ticket_id: uuid.UUID) -> Ticket | None:
-    """Loads a ticket and its owned address without acquiring a row lock."""
+    """Loads a ticket and its response relations without acquiring a row lock."""
 
     result = await db.execute(
-      select(Ticket)
-      .options(
-        selectinload(Ticket.address),
-        selectinload(Ticket.images),
-      )
-      .where(Ticket.id == ticket_id)
+      TicketProjectionRepository._detail_query().where(Ticket.id == ticket_id)
     )
     return result.scalar_one_or_none()
 
@@ -58,16 +64,11 @@ class TicketProjectionRepository:
     """Locks the projection while a new event and state update are appended."""
 
     result = await db.execute(
-      select(Ticket)
-      .options(
-        selectinload(Ticket.address),
-        selectinload(Ticket.images),
-      )
+      TicketProjectionRepository._detail_query()
       .where(Ticket.id == ticket_id)
       .with_for_update()
     )
     return result.scalar_one_or_none()
-
 
   @staticmethod
   async def has_active_user_dependency(
@@ -123,13 +124,8 @@ class TicketProjectionRepository:
   ) -> tuple[list[Ticket], int]:
     """Return public community tickets using the documented filters."""
 
-    query = (
-      select(Ticket)
-      .options(
-        selectinload(Ticket.address),
-        selectinload(Ticket.images),
-      )
-      .where(Ticket.visibility == TicketVisibility.PUBLIC)
+    query = TicketProjectionRepository._detail_query().where(
+      Ticket.visibility == TicketVisibility.PUBLIC
     )
     query = apply_search_filter(query, search, Ticket.title, Ticket.description)
 
@@ -147,16 +143,16 @@ class TicketProjectionRepository:
       query = query.outerjoin(Address, Ticket.address_id == Address.id)
       query = apply_bbox_filter(query, Address, bbox)
 
-    count_query = select(func.count()).select_from(query.order_by(None).subquery())
-    total = int((await db.execute(count_query)).scalar_one())
-
-    sort_column = TicketProjectionRepository.SORT_COLUMNS[sort_by]
-    ordering = sort_column.desc() if order == SortOrder.DESC else sort_column.asc()
-    query = query.order_by(ordering, Ticket.id.asc())
-    query = query.offset((page - 1) * size).limit(size)
-
-    result = await db.execute(query)
-    return list(result.scalars().unique().all()), total
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=TicketProjectionRepository.SORT_COLUMNS[sort_by],
+      order=order,
+      tie_breaker=Ticket.id,
+      unique=True,
+    )
 
   @staticmethod
   async def get_creator_page(
@@ -171,15 +167,10 @@ class TicketProjectionRepository:
     sort_by: TicketSortField = TicketSortField.CREATED_AT,
     order: SortOrder = SortOrder.DESC,
   ) -> tuple[list[Ticket], int]:
-    """Returns every public or private ticket created by one citizen."""
+    """Return every public or private ticket created by one citizen."""
 
-    query = (
-      select(Ticket)
-      .options(
-        selectinload(Ticket.address),
-        selectinload(Ticket.images),
-      )
-      .where(Ticket.creator_user_id == creator_user_id)
+    query = TicketProjectionRepository._detail_query().where(
+      Ticket.creator_user_id == creator_user_id
     )
     query = apply_search_filter(query, search, Ticket.title, Ticket.description)
     if status is not None:
@@ -187,17 +178,16 @@ class TicketProjectionRepository:
     if category is not None:
       query = query.where(Ticket.category == category)
 
-    count_query = select(func.count()).select_from(query.order_by(None).subquery())
-    total = int((await db.execute(count_query)).scalar_one())
-
-    sort_column = TicketProjectionRepository.SORT_COLUMNS[sort_by]
-    ordering = sort_column.desc() if order == SortOrder.DESC else sort_column.asc()
-    query = query.order_by(ordering, Ticket.id.asc())
-    query = query.offset((page - 1) * size).limit(size)
-
-    result = await db.execute(query)
-    return list(result.scalars().unique().all()), total
-
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=TicketProjectionRepository.SORT_COLUMNS[sort_by],
+      order=order,
+      tie_breaker=Ticket.id,
+      unique=True,
+    )
 
   @staticmethod
   def _staff_scope(current_user: User):
@@ -233,7 +223,6 @@ class TicketProjectionRepository:
         ),
       )
 
-    # Defensive fallback for accidental direct repository use.
     return false()
 
   @staticmethod
@@ -250,22 +239,11 @@ class TicketProjectionRepository:
     sort_by: TicketSortField = TicketSortField.UPDATED_AT,
     order: SortOrder = SortOrder.DESC,
   ) -> tuple[list[Ticket], int]:
-    """Returns a role-scoped work queue for the administrative client.
+    """Return the role-scoped active work queue for the authority client."""
 
-    Dispatchers see the central routing queue. Managers see active tickets of
-    their office as well as cross-office assignments. Officers see tickets
-    they own, currently process, or must receive back after a temporary step.
-    """
-
-    query = (
-      select(Ticket)
-      .options(
-        selectinload(Ticket.address),
-        selectinload(Ticket.images),
-      )
-      .where(TicketProjectionRepository._staff_scope(current_user))
+    query = TicketProjectionRepository._detail_query().where(
+      TicketProjectionRepository._staff_scope(current_user)
     )
-
     query = apply_search_filter(query, search, Ticket.title, Ticket.description)
     if workflow_state is not None:
       query = query.where(Ticket.workflow_state == workflow_state)
@@ -274,13 +252,13 @@ class TicketProjectionRepository:
     if category is not None:
       query = query.where(Ticket.category == category)
 
-    count_query = select(func.count()).select_from(query.order_by(None).subquery())
-    total = int((await db.execute(count_query)).scalar_one())
-
-    sort_column = TicketProjectionRepository.SORT_COLUMNS[sort_by]
-    ordering = sort_column.desc() if order == SortOrder.DESC else sort_column.asc()
-    query = query.order_by(ordering, Ticket.id.asc())
-    query = query.offset((page - 1) * size).limit(size)
-
-    result = await db.execute(query)
-    return list(result.scalars().unique().all()), total
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=TicketProjectionRepository.SORT_COLUMNS[sort_by],
+      order=order,
+      tie_breaker=Ticket.id,
+      unique=True,
+    )

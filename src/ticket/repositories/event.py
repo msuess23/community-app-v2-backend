@@ -7,6 +7,8 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from src.core.filters import SortOrder
+from src.core.pagination import execute_page
 from src.ticket.domain import TicketEventType
 from src.ticket.models import TicketEvent
 
@@ -33,6 +35,27 @@ class TicketEventRepository:
       .order_by(TicketEvent.sequence_number.asc())
     )
     return list(result.scalars().all())
+
+  @staticmethod
+  async def get_event_page(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    *,
+    page: int,
+    size: int,
+  ) -> tuple[list[TicketEvent], int]:
+    """Return a chronological page of one aggregate event stream."""
+
+    query = select(TicketEvent).where(TicketEvent.ticket_id == ticket_id)
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=TicketEvent.sequence_number,
+      order=SortOrder.ASC,
+      tie_breaker=TicketEvent.id,
+    )
 
   @staticmethod
   async def get_events_for_tickets(

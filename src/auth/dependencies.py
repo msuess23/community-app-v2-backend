@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import Depends, Path
+from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,41 +58,3 @@ def role_required(*allowed_roles: Role):
     return current_user
 
   return guard
-
-
-def can_access_user(current_user: User, target_user: User) -> bool:
-  """Returns whether a user may read the target profile."""
-  if current_user.id == target_user.id:
-    return True
-
-  if current_user.role == Role.ADMIN:
-    return True
-
-  if not target_user.is_active or target_user.role == Role.CITIZEN:
-    return False
-
-  if current_user.role == Role.DISPATCHER:
-    return True
-
-  if current_user.role in {Role.OFFICER, Role.MANAGER}:
-    return (
-      current_user.office_id is not None
-      and current_user.office_id == target_user.office_id
-    )
-
-  return False
-
-
-async def get_target_user_if_allowed(
-  user_id: uuid.UUID = Path(...),
-  current_user: User = Depends(get_current_user),
-  db: AsyncSession = Depends(get_db),
-) -> User:
-  target_user = await UserRepository.get_by_id(db, user_id)
-  if target_user is None:
-    raise ForbiddenException("You do not have permission to access this resource")
-
-  if not can_access_user(current_user, target_user):
-    raise ForbiddenException("You do not have permission to access this resource")
-
-  return target_user

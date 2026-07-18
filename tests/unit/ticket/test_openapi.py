@@ -59,3 +59,21 @@ def test_public_ticket_schemas_do_not_expose_internal_user_ids() -> None:
   assert "author_user_id" not in schemas["TicketCommentResponse"]["properties"]
   assert "uploaded_by_user_id" not in schemas["TicketImageResponse"]["properties"]
   assert "creator_user_id" in schemas["TicketInternalResponse"]["properties"]
+
+
+def test_histories_and_ticket_events_use_common_page_contract() -> None:
+  spec = app.openapi()
+
+  for path in (
+    "/api/v1/users/{user_id}/history",
+    "/api/v1/offices/{office_id}/history",
+    "/api/v1/tickets/{ticket_id}/events",
+  ):
+    operation = spec["paths"][path]["get"]
+    parameter_names = {parameter["name"] for parameter in operation["parameters"]}
+    response_schema = operation["responses"]["200"]["content"][
+      "application/json"
+    ]["schema"]
+
+    assert {"page", "size"} <= parameter_names
+    assert response_schema["$ref"].split("/")[-1].startswith("PaginatedResponse_")

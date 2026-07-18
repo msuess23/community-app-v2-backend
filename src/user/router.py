@@ -1,19 +1,24 @@
-from datetime import datetime
-from typing import Optional
 import uuid
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth.dependencies import (
-  get_current_user,
-  get_target_user_if_allowed,
-  role_required,
-)
+from src.auth.dependencies import get_current_user, role_required
 from src.core.database import get_db
 from src.core.filters import LifecycleStatusFilter, SortOrder
+from src.core.query_params import (
+  DateRangeParams,
+  PageParams,
+  SearchParams,
+  get_history_date_range,
+  get_page_params,
+  get_search_params,
+)
 from src.core.schemas import PaginatedResponse
+from src.user.dependencies import get_target_user_if_allowed
 from src.user.models import Role, User, UserSortField
+from src.user.roles import AUTHORITY_ROLES
 from src.user.schemas import (
   AdminUserUpdate,
   UserDeactivateRequest,
@@ -50,33 +55,27 @@ async def update_my_profile(
 
 @router.get("", response_model=PaginatedResponse[UserResponse])
 async def get_all_users(
-  q: Optional[str] = Query(
-    None,
-    max_length=200,
-    description="Search term for email, first name or last name",
-  ),
   office_id: Optional[uuid.UUID] = None,
   role: Optional[Role] = None,
   status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
-  page: int = Query(1, ge=1),
-  size: int = Query(20, ge=1, le=100),
   sort_by: UserSortField = UserSortField.LAST_NAME,
   order: SortOrder = SortOrder.ASC,
+  page_params: PageParams = Depends(get_page_params),
+  search_params: SearchParams = Depends(get_search_params),
   db: AsyncSession = Depends(get_db),
-  current_user: User = Depends(
-    role_required(Role.ADMIN, Role.MANAGER, Role.DISPATCHER, Role.OFFICER)
-  ),
+  current_user: User = Depends(role_required(*AUTHORITY_ROLES)),
 ):
-  """Lists users with role-based visibility and admin-only lifecycle filtering."""
+  """List users with role-scoped visibility and validated filters."""
+
   return await UserService.get_all_users(
     db,
     current_user,
-    page=page,
-    size=size,
+    page=page_params.page,
+    size=page_params.size,
     office_id=office_id,
     role=role,
     status=status,
-    search=q,
+    search=search_params.q,
     sort_by=sort_by,
     order=order,
   )
@@ -120,12 +119,22 @@ async def deactivate_user(
   )
 
 
-@router.get("/{user_id}/history", response_model=list[UserHistoryResponse])
+@router.get(
+  "/{user_id}/history",
+  response_model=PaginatedResponse[UserHistoryResponse],
+)
 async def get_user_history(
   user_id: uuid.UUID,
-  start_date: Optional[datetime] = Query(None),
-  end_date: Optional[datetime] = Query(None),
+  page_params: PageParams = Depends(get_page_params),
+  date_range: DateRangeParams = Depends(get_history_date_range),
   db: AsyncSession = Depends(get_db),
   _current_user: User = Depends(role_required(Role.ADMIN)),
 ):
-  return await UserService.get_user_history(db, user_id, start_date, end_date)
+  return await UserService.get_user_history(
+    db,
+    user_id,
+    page=page_params.page,
+    size=page_params.size,
+    start_date=date_range.start,
+    end_date=date_range.end,
+  )

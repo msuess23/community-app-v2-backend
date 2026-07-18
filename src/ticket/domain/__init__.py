@@ -1,5 +1,63 @@
-"""Public domain API for ticket enums, event payloads and aggregate replay."""
+"""Explicit public domain surface for the ticket aggregate."""
 
-from src.ticket.domain.aggregate import TicketAggregateState, evolve_ticket, rebuild_ticket  # noqa: F401
-from src.ticket.domain.enums import *  # noqa: F403
-from src.ticket.domain.payloads import *  # noqa: F403
+from src.ticket.domain.aggregate import TicketAggregateState, evolve_ticket, rebuild_ticket
+from src.ticket.domain.enums import (
+  EscalationDecision,
+  TicketCategory,
+  TicketCompletionOutcome,
+  TicketEventType,
+  TicketStatus,
+  TicketVisibility,
+  TicketWorkflowAction,
+  TicketWorkflowState,
+)
+from src.ticket.domain.payloads import (
+  CitizenRespondedPayload,
+  CitizenResponseRequestedPayload,
+  CosignatureRequestedPayload,
+  EscalationDecisionPayload,
+  PrimaryOfficerAssignedPayload,
+  TicketCancelledPayload,
+  TicketCommentedPayload,
+  TicketCompletedPayload,
+  TicketCosignedPayload,
+  TicketCoverImageChangedPayload,
+  TicketDetailsUpdatedPayload,
+  TicketDispatchedPayload,
+  TicketEscalatedPayload,
+  TicketForwardedPayload,
+  TicketImageAddedPayload,
+  TicketImageRemovedPayload,
+  TicketSubmittedPayload,
+)
+
+__all__ = [
+  "CitizenRespondedPayload",
+  "CitizenResponseRequestedPayload",
+  "CosignatureRequestedPayload",
+  "EscalationDecision",
+  "EscalationDecisionPayload",
+  "PrimaryOfficerAssignedPayload",
+  "TicketAggregateState",
+  "TicketCancelledPayload",
+  "TicketCategory",
+  "TicketCommentedPayload",
+  "TicketCompletedPayload",
+  "TicketCompletionOutcome",
+  "TicketCosignedPayload",
+  "TicketCoverImageChangedPayload",
+  "TicketDetailsUpdatedPayload",
+  "TicketDispatchedPayload",
+  "TicketEscalatedPayload",
+  "TicketEventType",
+  "TicketForwardedPayload",
+  "TicketImageAddedPayload",
+  "TicketImageRemovedPayload",
+  "TicketStatus",
+  "TicketSubmittedPayload",
+  "TicketVisibility",
+  "TicketWorkflowAction",
+  "TicketWorkflowState",
+  "evolve_ticket",
+  "rebuild_ticket",
+]

@@ -39,16 +39,15 @@ from src.ticket.schemas import (
 from src.ticket.services.event_store import TicketEventStore
 from src.ticket.services.loaders import require_ticket
 from src.user.models import Role, User
+from src.user.roles import CASE_WORKER_ROLES
 from src.user.repository import UserRepository
 
-
-STAFF_ROLES = {Role.OFFICER, Role.MANAGER}
 
 
 def _require_current_assignee(ticket: Ticket, current_user: User) -> None:
   """Ensure the caller currently owns the main workflow responsibility."""
 
-  if current_user.role not in STAFF_ROLES or ticket.current_assignee_id != current_user.id:
+  if current_user.role not in CASE_WORKER_ROLES or ticket.current_assignee_id != current_user.id:
     raise WorkflowValidationException(
       "Only the currently assigned employee may perform this action."
     )
@@ -71,7 +70,7 @@ async def _require_active_staff(
   """Load an active authority employee matching optional role constraints."""
 
   user = await UserRepository.get_by_id(db, user_id)
-  allowed_roles = roles or STAFF_ROLES
+  allowed_roles = roles or CASE_WORKER_ROLES
   if user is None or not user.is_active or user.role not in allowed_roles:
     raise WorkflowValidationException(error_message)
   return user

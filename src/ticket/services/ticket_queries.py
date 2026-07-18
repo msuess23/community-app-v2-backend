@@ -127,7 +127,7 @@ class TicketQueryService:
     """Return a public ticket or a private ticket visible to the caller."""
 
     ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
-    if ticket is None or not await TicketAccessPolicy.can_view(db, ticket, current_user):
+    if ticket is None or not TicketAccessPolicy.can_view(ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
     latest = await TicketQueryService._latest_status_events(db, [ticket.id])
     return TicketResponseMapper.to_public_ticket(
@@ -145,7 +145,7 @@ class TicketQueryService:
     """Return the reduced citizen-facing status history."""
 
     ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
-    if ticket is None or not await TicketAccessPolicy.can_view(db, ticket, current_user):
+    if ticket is None or not TicketAccessPolicy.can_view(ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
     return status_history(await TicketEventRepository.get_events(db, ticket_id))
 
@@ -158,7 +158,7 @@ class TicketQueryService:
     """Return the latest citizen-facing processing status."""
 
     ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
-    if ticket is None or not await TicketAccessPolicy.can_view(db, ticket, current_user):
+    if ticket is None or not TicketAccessPolicy.can_view(ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
     latest = await TicketQueryService._latest_status_events(db, [ticket.id])
     return TicketResponseMapper.to_status(latest.get(ticket.id))

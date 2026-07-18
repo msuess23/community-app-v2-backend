@@ -11,11 +11,7 @@ from alembic import context
 from src.core.database import Base
 from src.core.config import settings
 
-import src.address.models  # noqa: F401
-import src.auth.models  # noqa: F401
-import src.office.models  # noqa: F401
-import src.ticket.models  # noqa: F401
-import src.user.models  # noqa: F401
+import src.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -15,6 +15,7 @@ from src.core.filters import (
   apply_lifecycle_filter,
   apply_search_filter,
 )
+from src.core.pagination import execute_page
 from src.office.models import Office, OfficeHistory, OfficeSortField
 
 
@@ -74,16 +75,16 @@ class OfficeRepository:
       query = query.join(Office.address)
       query = apply_bbox_filter(query, Address, bbox)
 
-    count_query = select(func.count()).select_from(query.order_by(None).subquery())
-    total = int((await db.execute(count_query)).scalar_one())
-
-    sort_column = OfficeRepository.SORT_COLUMNS[sort_by]
-    ordering = sort_column.desc() if order == SortOrder.DESC else sort_column.asc()
-    query = query.order_by(ordering, Office.id.asc())
-    query = query.offset((page - 1) * size).limit(size)
-
-    result = await db.execute(query)
-    return list(result.scalars().unique().all()), total
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=OfficeRepository.SORT_COLUMNS[sort_by],
+      order=order,
+      tie_breaker=Office.id,
+      unique=True,
+    )
 
   @staticmethod
   def add(db: AsyncSession, office: Office) -> None:
@@ -94,12 +95,15 @@ class OfficeRepository:
     db.add(history_entry)
 
   @staticmethod
-  async def get_history_by_office_id(
+  async def get_history_page(
     db: AsyncSession,
     office_id: uuid.UUID,
+    *,
+    page: int,
+    size: int,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-  ) -> list[OfficeHistory]:
+  ) -> tuple[list[OfficeHistory], int]:
     query = select(OfficeHistory).where(OfficeHistory.office_id == office_id)
 
     if start_date:
@@ -107,7 +111,12 @@ class OfficeRepository:
     if end_date:
       query = query.where(OfficeHistory.changed_at <= end_date)
 
-    result = await db.execute(
-      query.order_by(OfficeHistory.changed_at.desc(), OfficeHistory.id.desc())
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=OfficeHistory.changed_at,
+      order=SortOrder.DESC,
+      tie_breaker=OfficeHistory.id,
     )
-    return list(result.scalars().all())

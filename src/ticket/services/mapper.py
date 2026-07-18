@@ -9,7 +9,6 @@ from src.ticket.domain import (
   TicketCompletionOutcome,
   TicketEventType,
   TicketStatus,
-  TicketWorkflowState,
 )
 from src.ticket.models import Ticket, TicketEvent
 from src.ticket.services.access_policy import TicketAccessPolicy
@@ -73,11 +72,7 @@ class TicketResponseMapper:
   ) -> TicketResponse:
     """Build a citizen-facing response without exposing workflow internals."""
 
-    can_edit = (
-      current_user is not None
-      and current_user.id == ticket.creator_user_id
-      and ticket.workflow_state == TicketWorkflowState.NEW
-    )
+    capabilities = TicketAccessPolicy.capabilities(ticket, current_user)
     active_images = [
       image for image in getattr(ticket, "images", []) if image.is_active
     ]
@@ -85,13 +80,6 @@ class TicketResponseMapper:
       (image for image in active_images if image.is_cover),
       active_images[0] if active_images else None,
     )
-    can_manage_images = can_edit
-    if current_user is not None:
-      can_manage_images = (
-        can_manage_images
-        or TicketAccessPolicy.can_manage_images(ticket, current_user)
-      )
-
     return TicketResponse(
       id=ticket.id,
       title=ticket.title,
@@ -111,8 +99,8 @@ class TicketResponseMapper:
         if cover_image is not None
         else None
       ),
-      can_edit=can_edit,
-      can_manage_images=can_manage_images,
+      can_edit=capabilities.can_edit,
+      can_manage_images=capabilities.can_manage_images,
       version=ticket.version,
     )
 
@@ -129,10 +117,6 @@ class TicketResponseMapper:
       ticket,
       current_status_event=current_status_event,
       current_user=current_user,
-    )
-    public_response.can_manage_images = TicketAccessPolicy.can_manage_images(
-      ticket,
-      current_user,
     )
     return TicketInternalResponse(
       **public_response.model_dump(),

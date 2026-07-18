@@ -26,36 +26,44 @@ class User(Base):
   __tablename__ = "users"
 
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-  email = Column(String, unique=True, index=True, nullable=False)
+  email = Column(String, index=True, nullable=False)
   hashed_password = Column(String, nullable=False)
   first_name = Column(String, nullable=False)
   last_name = Column(String, nullable=False)
-  role = Column(Enum(Role), default=Role.CITIZEN)
+  role = Column(Enum(Role), nullable=False, default=Role.CITIZEN)
   office_id = Column(UUID(as_uuid=True), ForeignKey("offices.id"), nullable=True)
-  is_active = Column(Boolean, default=True)
-  created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+  is_active = Column(Boolean, nullable=False, default=True)
+  created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
   deactivated_at = Column(DateTime(timezone=True), nullable=True)
 
   # Relationship to history (for audit trail)
-  history = relationship("UserHistory", back_populates="user")
+  history = relationship(
+    "UserHistory",
+    back_populates="user",
+    foreign_keys="UserHistory.user_id",
+  )
 
 class UserHistory(Base):
   __tablename__ = "user_history"
 
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-  user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
+  user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
   
   # Snapshot of the user data
-  email = Column(String)
-  first_name = Column(String)
-  last_name = Column(String)
-  role = Column(Enum(Role))
+  email = Column(String, nullable=False)
+  first_name = Column(String, nullable=False)
+  last_name = Column(String, nullable=False)
+  role = Column(Enum(Role), nullable=False)
   office_id = Column(UUID(as_uuid=True), ForeignKey("offices.id"), nullable=True)
   is_active = Column(Boolean, nullable=False, default=True)
   
   # Audit metadata
-  changed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-  changed_by_user_id = Column(UUID(as_uuid=True))
+  changed_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+  changed_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
   change_reason = Column(String, nullable=False)
 
-  user = relationship("User", back_populates="history")
+  user = relationship(
+    "User",
+    back_populates="history",
+    foreign_keys=[user_id],
+  )

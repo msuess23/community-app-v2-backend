@@ -5,6 +5,7 @@ from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.address.service import AddressService
+from src.address.snapshot import AddressSnapshot
 from src.core.exceptions import (
   ConflictException,
   DomainValidationException,
@@ -24,16 +25,6 @@ class OfficeService:
   """Handles office management and append-only result-state snapshots."""
 
   @staticmethod
-  def _address_snapshot(address) -> str | None:
-    if address is None:
-      return None
-    return (
-      f"{address.street} {address.house_number}, "
-      f"{address.zip_code} {address.city}"
-    )
-
-
-  @staticmethod
   def add_history_snapshot(
     db: AsyncSession,
     office: Office,
@@ -49,7 +40,11 @@ class OfficeService:
       phone=office.phone,
       services=list(office.services or []),
       opening_hours=dict(office.opening_hours or {}),
-      address_snapshot=OfficeService._address_snapshot(office.address),
+      address_snapshot=(
+        AddressSnapshot.from_address(office.address).model_dump(mode="json")
+        if office.address is not None
+        else None
+      ),
       is_active=office.is_active,
       changed_by_user_id=changed_by_user_id,
       change_reason=change_reason,
@@ -70,6 +65,15 @@ class OfficeService:
     sort_by: OfficeSortField = OfficeSortField.NAME,
     order: SortOrder = SortOrder.ASC,
   ) -> PaginatedResponse:
+    if (
+      (current_user is None or current_user.role != Role.ADMIN)
+      and status != LifecycleStatusFilter.ACTIVE
+    ):
+      raise DomainValidationException(
+        "Only administrators may filter inactive offices.",
+        error_code="LIFECYCLE_FILTER_NOT_ALLOWED",
+      )
+
     effective_status = (
       status
       if current_user is not None and current_user.role == Role.ADMIN
@@ -249,13 +253,26 @@ class OfficeService:
   async def get_office_history(
     db: AsyncSession,
     office_id: uuid.UUID,
+    *,
+    page: int,
+    size: int,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-  ) -> list[OfficeHistory]:
+  ) -> PaginatedResponse:
+    """Return a paginated append-only history for one office."""
+
     await OfficeService.get_office_by_id(db, office_id, include_inactive=True)
-    return await OfficeRepository.get_history_by_office_id(
+    history, total = await OfficeRepository.get_history_page(
       db,
       office_id,
-      start_date,
-      end_date,
+      page=page,
+      size=size,
+      start_date=start_date,
+      end_date=end_date,
+    )
+    return PaginatedResponse.create(
+      data=history,
+      total=total,
+      page=page,
+      size=size,
     )

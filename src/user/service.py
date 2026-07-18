@@ -19,13 +19,12 @@ from src.office.repository import OfficeRepository
 from src.ticket.services.lifecycle_guard import TicketLifecycleGuard
 from src.user.models import Role, User, UserHistory, UserSortField
 from src.user.repository import UserRepository
+from src.user.roles import CASE_WORKER_ROLES, OFFICE_REQUIRED_ROLES
 from src.user.schemas import AdminUserUpdate, UserUpdate
 
 
 class UserService:
   """Handles business logic for user management."""
-
-  STAFF_ROLES_REQUIRING_OFFICE = {Role.OFFICER, Role.MANAGER}
 
   @staticmethod
   def add_history_snapshot(
@@ -81,7 +80,7 @@ class UserService:
       resulting_office_id = user.office_id
 
     if (
-      resulting_role in UserService.STAFF_ROLES_REQUIRING_OFFICE
+      resulting_role in OFFICE_REQUIRED_ROLES
       and resulting_office_id is None
     ):
       raise DomainValidationException(
@@ -184,10 +183,30 @@ class UserService:
     sort_by: UserSortField = UserSortField.LAST_NAME,
     order: SortOrder = SortOrder.ASC,
   ) -> PaginatedResponse:
+    if current_user.role != Role.ADMIN and status != LifecycleStatusFilter.ACTIVE:
+      raise DomainValidationException(
+        "Only administrators may filter inactive users.",
+        error_code="LIFECYCLE_FILTER_NOT_ALLOWED",
+      )
+    if current_user.role != Role.ADMIN and role == Role.CITIZEN:
+      raise DomainValidationException(
+        "Only administrators may search citizen accounts.",
+        error_code="ROLE_FILTER_NOT_ALLOWED",
+      )
+    if (
+      current_user.role in CASE_WORKER_ROLES
+      and office_id is not None
+      and office_id != current_user.office_id
+    ):
+      raise DomainValidationException(
+        "The office filter is outside the caller's scope.",
+        error_code="OFFICE_FILTER_OUTSIDE_SCOPE",
+      )
+
     exclude_citizens = current_user.role != Role.ADMIN
     force_office_id = (
       current_user.office_id
-      if current_user.role in {Role.OFFICER, Role.MANAGER}
+      if current_user.role in CASE_WORKER_ROLES
       else None
     )
     effective_status = (
@@ -277,13 +296,26 @@ class UserService:
   async def get_user_history(
     db: AsyncSession,
     user_id: uuid.UUID,
+    *,
+    page: int,
+    size: int,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-  ) -> list[UserHistory]:
+  ) -> PaginatedResponse:
+    """Return a paginated append-only history for one user."""
+
     await UserService.get_user_by_id(db, user_id)
-    return await UserRepository.get_history_by_user_id(
+    history, total = await UserRepository.get_history_page(
       db,
       user_id,
-      start_date,
-      end_date,
+      page=page,
+      size=size,
+      start_date=start_date,
+      end_date=end_date,
+    )
+    return PaginatedResponse.create(
+      data=history,
+      total=total,
+      page=page,
+      size=size,
     )

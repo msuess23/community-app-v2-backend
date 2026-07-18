@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Body, Depends, Query, Response, status
@@ -12,12 +11,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.dependencies import get_current_user, get_optional_current_user, role_required
 from src.core.database import get_db
 from src.core.filters import SortOrder, get_bbox_filter
+from src.core.query_params import (
+  DateRangeParams,
+  PageParams,
+  SearchParams,
+  get_created_date_range,
+  get_page_params,
+  get_search_params,
+)
 from src.core.schemas import PaginatedResponse
 from src.ticket.domain import TicketCategory, TicketStatus
 from src.ticket.models import TicketSortField
 from src.ticket.schemas import (
   TicketCancelRequest,
-  TicketCitizenResponseRequest, TicketCreateRequest, TicketResponse, TicketStatusResponse, TicketUpdateRequest,
+  TicketCitizenResponseRequest,
+  TicketCreateRequest,
+  TicketResponse,
+  TicketStatusResponse,
+  TicketUpdateRequest,
 )
 from src.ticket.services.mapper import TicketResponseMapper
 from src.ticket.services.ticket_commands import TicketCommandService
@@ -28,36 +39,35 @@ from src.user.models import Role, User
 
 router = APIRouter()
 
+
 @router.get("", response_model=PaginatedResponse[TicketResponse])
 async def list_public_tickets(
   office_id: uuid.UUID | None = Query(None),
   category: TicketCategory | None = Query(None),
-  created_from: datetime | None = Query(None),
-  created_to: datetime | None = Query(None),
   bbox: Optional[Tuple[float, float, float, float]] = Depends(get_bbox_filter),
   ticket_status: TicketStatus | None = Query(None, alias="status"),
-  q: str | None = Query(None, max_length=200),
-  page: int = Query(1, ge=1),
-  size: int = Query(20, ge=1, le=100),
   sort_by: TicketSortField = Query(TicketSortField.CREATED_AT),
   order: SortOrder = SortOrder.DESC,
+  page_params: PageParams = Depends(get_page_params),
+  search_params: SearchParams = Depends(get_search_params),
+  created_range: DateRangeParams = Depends(get_created_date_range),
   db: AsyncSession = Depends(get_db),
   current_user: User | None = Depends(get_optional_current_user),
 ):
-  """List public community tickets using snake_case query parameters."""
+  """List public community tickets using shared validated query parameters."""
 
   return await TicketQueryService.list_public_tickets(
     db,
     current_user=current_user,
-    page=page,
-    size=size,
+    page=page_params.page,
+    size=page_params.size,
     office_id=office_id,
     category=category,
     status=ticket_status,
-    created_from=created_from,
-    created_to=created_to,
+    created_from=created_range.start,
+    created_to=created_range.end,
     bbox=bbox,
-    search=q,
+    search=search_params.q,
     sort_by=sort_by,
     order=order,
   )
@@ -67,24 +77,23 @@ async def list_public_tickets(
 async def list_my_tickets(
   ticket_status: TicketStatus | None = Query(None, alias="status"),
   category: TicketCategory | None = Query(None),
-  q: str | None = Query(None, max_length=200),
-  page: int = Query(1, ge=1),
-  size: int = Query(20, ge=1, le=100),
   sort_by: TicketSortField = Query(TicketSortField.CREATED_AT),
   order: SortOrder = SortOrder.DESC,
+  page_params: PageParams = Depends(get_page_params),
+  search_params: SearchParams = Depends(get_search_params),
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(get_current_user),
 ):
-  """Lists all public and private tickets created by the current user."""
+  """List all public and private tickets created by the current user."""
 
   return await TicketQueryService.list_my_tickets(
     db,
     current_user=current_user,
-    page=page,
-    size=size,
+    page=page_params.page,
+    size=page_params.size,
     status=ticket_status,
     category=category,
-    search=q,
+    search=search_params.q,
     sort_by=sort_by,
     order=order,
   )
@@ -96,7 +105,7 @@ async def get_ticket(
   db: AsyncSession = Depends(get_db),
   current_user: User | None = Depends(get_optional_current_user),
 ):
-  """Returns a public ticket or a private ticket visible to the caller."""
+  """Return a public ticket or a private ticket visible to the caller."""
 
   return await TicketQueryService.get_ticket(db, ticket_id, current_user)
 
@@ -107,7 +116,7 @@ async def get_ticket_status_history(
   db: AsyncSession = Depends(get_db),
   current_user: User | None = Depends(get_optional_current_user),
 ):
-  """Returns the reduced citizen-facing status history."""
+  """Return the reduced citizen-facing status history."""
 
   return await TicketQueryService.get_status_history(db, ticket_id, current_user)
 
@@ -122,7 +131,7 @@ async def get_current_ticket_status(
   db: AsyncSession = Depends(get_db),
   current_user: User | None = Depends(get_optional_current_user),
 ):
-  """Returns the latest citizen-facing status or HTTP 204 if none exists."""
+  """Return the latest citizen-facing status or HTTP 204 if none exists."""
 
   current = await TicketQueryService.get_current_status(db, ticket_id, current_user)
   if current is None:
@@ -137,7 +146,7 @@ async def respond_to_ticket_question(
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(role_required(Role.CITIZEN)),
 ):
-  """Lets the ticket creator answer the currently pending authority question."""
+  """Let the ticket creator answer the currently pending authority question."""
 
   ticket, event = await TicketWorkflowCommandService.respond_as_citizen(
     db, ticket_id, request, current_user
@@ -155,7 +164,7 @@ async def create_ticket(
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(role_required(Role.CITIZEN)),
 ):
-  """Submits a ticket to the dispatcher inbox without an office selection."""
+  """Submit a ticket to the dispatcher inbox without an office selection."""
 
   return await TicketCommandService.create_ticket(db, request, current_user)
 
@@ -167,7 +176,7 @@ async def update_ticket(
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(role_required(Role.CITIZEN)),
 ):
-  """Updates a citizen ticket before it has been dispatched."""
+  """Update a citizen ticket before it has been dispatched."""
 
   return await TicketCommandService.update_ticket(db, ticket_id, request, current_user)
 
@@ -179,6 +188,6 @@ async def cancel_ticket(
   db: AsyncSession = Depends(get_db),
   current_user: User = Depends(role_required(Role.CITIZEN)),
 ):
-  """Cancels a ticket while it is still waiting in the central inbox."""
+  """Cancel a ticket while it is still waiting in the central inbox."""
 
   await TicketCommandService.cancel_ticket(db, ticket_id, request, current_user)

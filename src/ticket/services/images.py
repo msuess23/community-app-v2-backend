@@ -31,6 +31,7 @@ from src.ticket.services.access_policy import TicketAccessPolicy
 from src.ticket.services.event_store import TicketEventStore
 from src.ticket.services.loaders import require_ticket
 from src.user.models import Role, User
+from src.user.roles import CASE_WORKER_ROLES
 
 
 class TicketImageService:
@@ -77,7 +78,7 @@ class TicketImageService:
         )
       return
 
-    if current_user.role not in {Role.OFFICER, Role.MANAGER}:
+    if current_user.role not in CASE_WORKER_ROLES:
       raise ForbiddenException("Only assigned authority staff may manage ticket images")
     if ticket.workflow_state == TicketWorkflowState.COMPLETED:
       raise ConflictException(
@@ -98,13 +99,13 @@ class TicketImageService:
     """Lists current images or, for authorized staff, the complete audit list."""
 
     ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
-    if ticket is None or not await TicketAccessPolicy.can_view(db, ticket, current_user):
+    if ticket is None or not TicketAccessPolicy.can_view(ticket, current_user):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
 
     if include_removed:
-      if current_user is None or current_user.role not in {Role.OFFICER, Role.MANAGER}:
+      if current_user is None or current_user.role not in CASE_WORKER_ROLES:
         raise ForbiddenException("Only authority staff may view removed ticket images")
-      if not await TicketAccessPolicy.can_view_internal(db, ticket, current_user):
+      if not TicketAccessPolicy.can_view_internal(ticket, current_user):
         raise ForbiddenException("The user has no internal access to this ticket")
 
     images = await TicketImageRepository.get_images(
@@ -292,18 +293,18 @@ class TicketImageService:
       )
 
     if image.is_active:
-      if not await TicketAccessPolicy.can_view(db, ticket, current_user):
+      if not TicketAccessPolicy.can_view(ticket, current_user):
         raise ResourceNotFoundException(
           "Ticket image not found",
           error_code="TICKET_IMAGE_NOT_FOUND",
         )
     else:
-      if current_user is None or current_user.role not in {Role.OFFICER, Role.MANAGER}:
+      if current_user is None or current_user.role not in CASE_WORKER_ROLES:
         raise ResourceNotFoundException(
           "Ticket image not found",
           error_code="TICKET_IMAGE_NOT_FOUND",
         )
-      if not await TicketAccessPolicy.can_view_internal(db, ticket, current_user):
+      if not TicketAccessPolicy.can_view_internal(ticket, current_user):
         raise ResourceNotFoundException(
           "Ticket image not found",
           error_code="TICKET_IMAGE_NOT_FOUND",

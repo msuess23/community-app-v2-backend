@@ -9,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.address.models import Address
 from src.address.schemas import AddressCreate
+from src.address.snapshot import AddressSnapshot
 from src.core.exceptions import ResourceNotFoundException
 from src.ticket.domain import (
-  AddressSnapshot,
   TicketAggregateState,
   TicketEventType,
   evolve_ticket,
@@ -29,16 +29,7 @@ class TicketEventStore:
   def address_snapshot(address: Address | AddressCreate | None) -> AddressSnapshot | None:
     """Convert an address entity or request into an immutable event value."""
 
-    if address is None:
-      return None
-    return AddressSnapshot(
-      street=address.street,
-      house_number=address.house_number,
-      zip_code=address.zip_code,
-      city=address.city,
-      latitude=address.latitude,
-      longitude=address.longitude,
-    )
+    return AddressSnapshot.from_address(address)
 
   @staticmethod
   def state_from_ticket(ticket: Ticket) -> TicketAggregateState:

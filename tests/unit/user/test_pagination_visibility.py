@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.core.exceptions import DomainValidationException
 from src.core.filters import LifecycleStatusFilter
 from src.user.models import Role, User
 from src.user.repository import UserRepository
@@ -23,17 +24,19 @@ def make_user(role: Role, office_id=None) -> User:
 
 
 @pytest.mark.asyncio
-async def test_non_admin_user_list_forces_active_status(monkeypatch):
+async def test_non_admin_user_list_rejects_inactive_filter(monkeypatch):
   get_page = AsyncMock(return_value=([], 0))
   monkeypatch.setattr(UserRepository, "get_page", get_page)
 
-  await UserService.get_all_users(
-    MagicMock(),
-    make_user(Role.DISPATCHER),
-    status=LifecycleStatusFilter.ALL,
-  )
+  with pytest.raises(DomainValidationException) as exc_info:
+    await UserService.get_all_users(
+      MagicMock(),
+      make_user(Role.DISPATCHER),
+      status=LifecycleStatusFilter.ALL,
+    )
 
-  assert get_page.await_args.kwargs["status"] == LifecycleStatusFilter.ACTIVE
+  assert exc_info.value.error_code == "LIFECYCLE_FILTER_NOT_ALLOWED"
+  get_page.assert_not_awaited()
 
 
 @pytest.mark.asyncio

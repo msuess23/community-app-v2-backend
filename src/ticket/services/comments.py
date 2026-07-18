@@ -20,6 +20,7 @@ from src.ticket.services.access_policy import TicketAccessPolicy
 from src.ticket.services.event_store import TicketEventStore
 from src.ticket.services.loaders import require_ticket
 from src.user.models import Role, User
+from src.user.roles import AUTHORITY_ROLES
 
 
 class TicketCommentService:
@@ -56,12 +57,8 @@ class TicketCommentService:
         raise ForbiddenException("Citizens cannot create internal comments")
       if ticket.workflow_state == TicketWorkflowState.COMPLETED:
         raise WorkflowValidationException("A completed ticket no longer accepts comments.")
-    elif current_user.role in {Role.DISPATCHER, Role.OFFICER, Role.MANAGER}:
-      if not await TicketAccessPolicy.can_view_internal(
-        db,
-        ticket,
-        current_user,
-      ):
+    elif current_user.role in AUTHORITY_ROLES:
+      if not TicketAccessPolicy.can_view_internal(ticket, current_user):
         raise ResourceNotFoundException(
           "Ticket not found",
           error_code="TICKET_NOT_FOUND",
@@ -94,23 +91,13 @@ class TicketCommentService:
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
 
     include_internal = False
-    if current_user is not None and current_user.role in {
-      Role.DISPATCHER,
-      Role.OFFICER,
-      Role.MANAGER,
-    }:
-      include_internal = await TicketAccessPolicy.can_view_internal(
-        db,
-        ticket,
-        current_user,
-      )
+    if current_user is not None and current_user.role in AUTHORITY_ROLES:
+      include_internal = TicketAccessPolicy.can_view_internal(ticket, current_user)
 
     # A signed-in staff user without internal access retains the same public
     # visibility as an anonymous caller, but never receives internal notes.
-    if not include_internal and not await TicketAccessPolicy.can_view(
-      db,
-      ticket,
-      current_user,
+    if not include_internal and not TicketAccessPolicy.can_view(
+      ticket, current_user
     ):
       raise ResourceNotFoundException("Ticket not found", error_code="TICKET_NOT_FOUND")
 

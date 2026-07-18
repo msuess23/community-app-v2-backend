@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from src.address.snapshot import AddressSnapshot
 from src.address.schemas import (
   AddressCreate,
   AddressResponse,
@@ -193,7 +194,7 @@ class OfficeHistoryResponse(BaseModel):
   phone: Optional[str] = None
   services: list[str] = Field(default_factory=list)
   opening_hours: dict = Field(default_factory=dict)
-  address_snapshot: Optional[str] = None
+  address_snapshot: Optional[AddressSnapshot] = None
   is_active: bool
   changed_by_user_id: UUID
   change_reason: str

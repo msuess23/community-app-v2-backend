@@ -62,12 +62,3 @@ class AddressResponse(BaseModel):
   longitude: Optional[float] = None
 
   model_config = ConfigDict(from_attributes=True)
-
-
-class AddressHistorySnapshot(BaseModel):
-  street: str
-  house_number: str
-  zip_code: str
-  city: str
-  latitude: Optional[float] = None
-  longitude: Optional[float] = None

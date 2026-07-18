@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, TypeAdapter
 
+from src.address.snapshot import AddressSnapshot
+
 from src.ticket.domain.enums import (
   EscalationDecision,
   TicketCategory,
@@ -15,16 +17,6 @@ from src.ticket.domain.enums import (
   TicketVisibility,
 )
 
-
-class AddressSnapshot(BaseModel):
-  """Immutable address value embedded in ticket event payloads."""
-
-  street: str
-  house_number: str
-  zip_code: str
-  city: str
-  latitude: float | None = None
-  longitude: float | None = None
 
 
 class TicketSubmittedPayload(BaseModel):
