@@ -15,6 +15,17 @@ from src.core.exceptions import (
   ForbiddenException,
   ResourceNotFoundException,
 )
+from src.media.cover import (
+  apply_cover_change,
+  new_image_should_be_cover,
+  plan_cover_after_removal,
+  plan_cover_selection,
+)
+from src.media.storage import (
+  ImageStorageConfig,
+  ImageStorageErrorCodes,
+  LocalImageStorage,
+)
 from src.ticket.domain import (
   TicketCoverImageChangedPayload,
   TicketEventType,
@@ -22,7 +33,6 @@ from src.ticket.domain import (
   TicketImageRemovedPayload,
   TicketWorkflowState,
 )
-from src.ticket.storage import LocalTicketMediaStorage
 from src.ticket.models import Ticket, TicketImage
 from src.ticket.repositories.image import TicketImageRepository
 from src.ticket.repositories.ticket import TicketProjectionRepository
@@ -35,7 +45,28 @@ from src.user.roles import CASE_WORKER_ROLES
 
 
 class TicketImageService:
-  """Coordinates immutable image files, events and current image projections."""
+  """Coordinate ticket permissions, image events and current projections."""
+
+  @staticmethod
+  def _storage_config() -> ImageStorageConfig:
+    """Build the ticket-specific configuration for the shared image store."""
+
+    return ImageStorageConfig(
+      root=settings.TICKET_MEDIA_ROOT,
+      max_bytes=settings.TICKET_IMAGE_MAX_BYTES,
+      allowed_mime_types=frozenset(settings.TICKET_IMAGE_ALLOWED_MIME_TYPES),
+      fallback_filename="ticket-image",
+      subject="ticket",
+      errors=ImageStorageErrorCodes(
+        unsupported_type="UNSUPPORTED_TICKET_IMAGE_TYPE",
+        too_large="TICKET_IMAGE_TOO_LARGE",
+        empty="EMPTY_TICKET_IMAGE",
+        invalid_content="INVALID_TICKET_IMAGE_CONTENT",
+        type_mismatch="TICKET_IMAGE_TYPE_MISMATCH",
+        invalid_dimensions="INVALID_TICKET_IMAGE_DIMENSIONS",
+        file_not_found="TICKET_IMAGE_FILE_NOT_FOUND",
+      ),
+    )
 
   @staticmethod
   def _image_url(ticket_id: uuid.UUID, image_id: uuid.UUID) -> str:
@@ -45,7 +76,7 @@ class TicketImageService:
 
   @staticmethod
   def _response(image: TicketImage) -> TicketImageResponse:
-    """Converts one image projection into its API metadata representation."""
+    """Convert one image projection into its API metadata representation."""
 
     return TicketImageResponse(
       id=image.id,
@@ -54,6 +85,8 @@ class TicketImageService:
       original_filename=image.original_filename,
       mime_type=image.mime_type,
       size_bytes=image.size_bytes,
+      width=image.width,
+      height=image.height,
       uploaded_at=image.uploaded_at,
       is_active=image.is_active,
       is_cover=image.is_cover,
@@ -66,7 +99,7 @@ class TicketImageService:
     ticket: Ticket,
     current_user: User,
   ) -> None:
-    """Applies the immutable-submission rule and staff workflow permissions."""
+    """Apply the immutable-submission rule and staff workflow permissions."""
 
     if current_user.role == Role.CITIZEN:
       if current_user.id != ticket.creator_user_id:
@@ -96,7 +129,7 @@ class TicketImageService:
     *,
     include_removed: bool = False,
   ) -> list[TicketImageResponse]:
-    """Lists current images or, for authorized staff, the complete audit list."""
+    """List current images or, for authorized staff, the complete audit list."""
 
     ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     if ticket is None or not TicketAccessPolicy.can_view(ticket, current_user):
@@ -122,16 +155,18 @@ class TicketImageService:
     upload: UploadFile,
     current_user: User,
   ) -> TicketImageResponse:
-    """Stores a new immutable file and records its metadata in the event stream."""
+    """Store a new immutable file and record its metadata in the event stream."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     await TicketImageService._require_manage_permission(db, ticket, current_user)
 
     image_id = uuid.uuid4()
-    stored = await LocalTicketMediaStorage.save_upload(
+    storage_config = TicketImageService._storage_config()
+    stored = await LocalImageStorage.save_upload(
       upload,
-      ticket_id=ticket.id,
+      owner_path=str(ticket.id),
       image_id=image_id,
+      config=storage_config,
     )
     active_images = await TicketImageRepository.get_images(
       db,
@@ -139,7 +174,7 @@ class TicketImageService:
       include_removed=False,
       for_update=True,
     )
-    is_cover = not active_images
+    is_cover = new_image_should_be_cover(active_images)
 
     try:
       event = await TicketEventStore.append(
@@ -153,6 +188,8 @@ class TicketImageService:
           original_filename=stored.original_filename,
           mime_type=stored.mime_type,
           size_bytes=stored.size_bytes,
+          width=stored.width,
+          height=stored.height,
           is_cover=is_cover,
         ),
       )
@@ -163,6 +200,8 @@ class TicketImageService:
         original_filename=stored.original_filename,
         mime_type=stored.mime_type,
         size_bytes=stored.size_bytes,
+        width=stored.width,
+        height=stored.height,
         uploaded_by_user_id=current_user.id,
         uploaded_at=event.occurred_at,
         is_active=True,
@@ -174,8 +213,7 @@ class TicketImageService:
       await db.flush()
     except Exception:
       # Failures before the request commit must not leave an unreferenced file.
-      path = Path(settings.TICKET_MEDIA_ROOT).expanduser().resolve() / stored.storage_key
-      path.unlink(missing_ok=True)
+      LocalImageStorage.delete_file(stored.storage_key, config=storage_config)
       raise
 
     return TicketImageService._response(image)
@@ -187,7 +225,7 @@ class TicketImageService:
     image_id: uuid.UUID,
     current_user: User,
   ) -> TicketImageResponse:
-    """Changes the cover projection while preserving the decision as an event."""
+    """Change the cover projection while preserving the decision as an event."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     await TicketImageService._require_manage_permission(db, ticket, current_user)
@@ -197,13 +235,16 @@ class TicketImageService:
       include_removed=False,
       for_update=True,
     )
-    selected = next((image for image in images if image.id == image_id), None)
-    if selected is None:
+    try:
+      change = plan_cover_selection(images, image_id)
+    except ValueError as exc:
       raise ResourceNotFoundException(
         "Ticket image not found",
         error_code="TICKET_IMAGE_NOT_FOUND",
-      )
-    if selected.is_cover:
+      ) from exc
+
+    selected = next(image for image in images if image.id == image_id)
+    if not change.changed:
       return TicketImageService._response(selected)
 
     event = await TicketEventStore.append(
@@ -213,10 +254,9 @@ class TicketImageService:
       event_type=TicketEventType.TICKET_COVER_IMAGE_CHANGED,
       payload=TicketCoverImageChangedPayload(image_id=selected.id),
     )
-    for image in images:
-      image.is_cover = image.id == selected.id
-      if image.is_cover:
-        image.cover_selected_event_id = event.id
+    selected = apply_cover_change(images, change)
+    assert selected is not None
+    selected.cover_selected_event_id = event.id
     await db.flush()
     return TicketImageService._response(selected)
 
@@ -228,7 +268,7 @@ class TicketImageService:
     request: TicketImageRemoveRequest,
     current_user: User,
   ) -> None:
-    """Deactivates an image projection but intentionally retains its file."""
+    """Deactivate an image projection but intentionally retain its file."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
     await TicketImageService._require_manage_permission(db, ticket, current_user)
@@ -238,12 +278,14 @@ class TicketImageService:
       include_removed=False,
       for_update=True,
     )
-    image = next((item for item in images if item.id == image_id), None)
-    if image is None:
+    try:
+      cover_change = plan_cover_after_removal(images, image_id)
+    except ValueError as exc:
       raise ResourceNotFoundException(
         "Ticket image not found",
         error_code="TICKET_IMAGE_NOT_FOUND",
-      )
+      ) from exc
+    image = next(item for item in images if item.id == image_id)
 
     removed_at = datetime.now(timezone.utc)
     removed_event = await TicketEventStore.append(
@@ -260,19 +302,17 @@ class TicketImageService:
     image.removed_by_user_id = current_user.id
     image.removed_event_id = removed_event.id
 
-    remaining = [item for item in images if item.id != image.id]
-    if remaining and not any(item.is_cover for item in remaining):
-      # Selecting a replacement cover is a second explicit aggregate event.
-      new_cover = remaining[0]
+    selected = apply_cover_change(images, cover_change)
+    if cover_change.changed and selected is not None:
+      # The replacement is a separate event because the cover affects public output.
       cover_event = await TicketEventStore.append(
         db,
         ticket,
         actor_user_id=current_user.id,
         event_type=TicketEventType.TICKET_COVER_IMAGE_CHANGED,
-        payload=TicketCoverImageChangedPayload(image_id=new_cover.id),
+        payload=TicketCoverImageChangedPayload(image_id=selected.id),
       )
-      new_cover.is_cover = True
-      new_cover.cover_selected_event_id = cover_event.id
+      selected.cover_selected_event_id = cover_event.id
     await db.flush()
 
   @staticmethod
@@ -282,7 +322,7 @@ class TicketImageService:
     image_id: uuid.UUID,
     current_user: User | None,
   ) -> tuple[Path, TicketImage]:
-    """Returns image bytes, including removed revisions only for internal staff."""
+    """Return image bytes, including removed revisions only for internal staff."""
 
     ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     image = await TicketImageRepository.get_image(db, ticket_id, image_id)
@@ -310,4 +350,8 @@ class TicketImageService:
           error_code="TICKET_IMAGE_NOT_FOUND",
         )
 
-    return LocalTicketMediaStorage.resolve_file(image.storage_key), image
+    path = LocalImageStorage.resolve_file(
+      image.storage_key,
+      config=TicketImageService._storage_config(),
+    )
+    return path, image

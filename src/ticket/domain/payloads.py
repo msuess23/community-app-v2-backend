@@ -134,6 +134,8 @@ class TicketImageAddedPayload(BaseModel):
   original_filename: str
   mime_type: str
   size_bytes: int
+  width: int | None = None
+  height: int | None = None
   is_cover: bool
 
 

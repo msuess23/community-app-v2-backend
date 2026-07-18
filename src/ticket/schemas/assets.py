@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.core.request_models import StrictRequestModel
 from src.core.validation import normalize_optional_text, normalize_required_text
+from src.media.schemas import ImageMetadataResponse
 
 
 class TicketCommentCreateRequest(StrictRequestModel):
@@ -35,18 +36,11 @@ class TicketCommentResponse(BaseModel):
   created_at: datetime
 
 
-class TicketImageResponse(BaseModel):
+class TicketImageResponse(ImageMetadataResponse):
   """Metadata for one current or historically removed ticket image."""
 
-  id: UUID
   ticket_id: UUID
-  url: str
-  original_filename: str
-  mime_type: str
-  size_bytes: int
-  uploaded_at: datetime
   is_active: bool
-  is_cover: bool
   removed_at: datetime | None = None
 
 

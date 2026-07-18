@@ -1,18 +1,13 @@
-from io import BytesIO
-from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from fastapi import UploadFile
-from starlette.datastructures import Headers
 
-from src.core.config import settings
 from src.core.exceptions import ConflictException
+from src.media.storage import StoredImage
 from src.ticket.domain import TicketCategory, TicketWorkflowState
-from src.ticket.services.images import TicketImageService
-from src.ticket.storage import LocalTicketMediaStorage
 from src.ticket.models import Ticket
+from src.ticket.services.images import TicketImageService
 from src.user.models import Role, User
 
 
@@ -40,27 +35,6 @@ def _ticket(citizen: User, state: TicketWorkflowState) -> Ticket:
 
 
 @pytest.mark.asyncio
-async def test_local_storage_streams_supported_image(monkeypatch, tmp_path) -> None:
-  monkeypatch.setattr(settings, "TICKET_MEDIA_ROOT", str(tmp_path))
-  upload = UploadFile(
-    file=BytesIO(b"jpeg-bytes"),
-    filename="../damage.jpg",
-    headers=Headers({"content-type": "image/jpeg"}),
-  )
-
-  stored = await LocalTicketMediaStorage.save_upload(
-    upload,
-    ticket_id=uuid4(),
-    image_id=uuid4(),
-  )
-
-  assert stored.original_filename == "damage.jpg"
-  assert stored.mime_type == "image/jpeg"
-  assert stored.size_bytes == len(b"jpeg-bytes")
-  assert (Path(tmp_path) / stored.storage_key).read_bytes() == b"jpeg-bytes"
-
-
-@pytest.mark.asyncio
 async def test_citizen_cannot_change_images_after_dispatch() -> None:
   citizen = _citizen()
   ticket = _ticket(citizen, TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT)
@@ -76,11 +50,12 @@ async def test_citizen_cannot_change_images_after_dispatch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) -> None:
+async def test_upload_records_validated_image_event_and_projection(
+  monkeypatch,
+) -> None:
   from datetime import datetime, timezone
 
   from src.ticket.domain import TicketEventType
-  from src.ticket.storage import StoredTicketImage
   from src.ticket.models import TicketEvent, TicketImage
 
   citizen = _citizen()
@@ -99,7 +74,6 @@ async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) 
   )
   staged: list[TicketImage] = []
 
-  monkeypatch.setattr(settings, "TICKET_MEDIA_ROOT", str(tmp_path))
   monkeypatch.setattr(
     "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
     AsyncMock(return_value=ticket),
@@ -109,13 +83,15 @@ async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) 
     AsyncMock(return_value=[]),
   )
   monkeypatch.setattr(
-    "src.ticket.services.images.LocalTicketMediaStorage.save_upload",
+    "src.ticket.services.images.LocalImageStorage.save_upload",
     AsyncMock(
-      return_value=StoredTicketImage(
+      return_value=StoredImage(
         storage_key=f"{ticket.id}/image.jpg",
         original_filename="image.jpg",
         mime_type="image/jpeg",
         size_bytes=100,
+        width=640,
+        height=480,
       )
     ),
   )
@@ -133,8 +109,11 @@ async def test_upload_records_image_event_and_projection(monkeypatch, tmp_path) 
 
   assert response.is_cover is True
   assert response.is_active is True
+  assert (response.width, response.height) == (640, 480)
   assert "uploaded_by_user_id" not in response.model_dump()
   assert len(staged) == 1
   assert staged[0].added_event_id == event.id
   assert staged[0].storage_key.endswith("image.jpg")
   assert append_event.await_args.kwargs["event_type"] == TicketEventType.TICKET_IMAGE_ADDED
+  payload = append_event.await_args.kwargs["payload"]
+  assert (payload.width, payload.height) == (640, 480)

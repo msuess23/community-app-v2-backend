@@ -24,6 +24,8 @@ class TicketImageProjectionState(BaseModel):
   original_filename: str
   mime_type: str
   size_bytes: int
+  width: int | None = None
+  height: int | None = None
   uploaded_by_user_id: UUID
   uploaded_at: datetime
   is_active: bool
@@ -51,6 +53,8 @@ def rebuild_ticket_images(
         original_filename=payload.original_filename,
         mime_type=payload.mime_type,
         size_bytes=payload.size_bytes,
+        width=payload.width,
+        height=payload.height,
         uploaded_by_user_id=actor_user_id,
         uploaded_at=occurred_at,
         is_active=True,

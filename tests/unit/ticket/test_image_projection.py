@@ -27,6 +27,8 @@ def test_image_projection_rebuilds_cover_and_removed_revisions() -> None:
           "original_filename": "first.jpg",
           "mime_type": "image/jpeg",
           "size_bytes": 100,
+          "width": 640,
+          "height": 480,
           "is_cover": True,
         },
         now,
@@ -41,6 +43,8 @@ def test_image_projection_rebuilds_cover_and_removed_revisions() -> None:
           "original_filename": "second.jpg",
           "mime_type": "image/jpeg",
           "size_bytes": 120,
+          "width": 320,
+          "height": 240,
           "is_cover": False,
         },
         now + timedelta(seconds=1),
@@ -64,5 +68,6 @@ def test_image_projection_rebuilds_cover_and_removed_revisions() -> None:
 
   assert projection[first].is_active is False
   assert projection[first].removed_event_id == remove_event
+  assert (projection[first].width, projection[first].height) == (640, 480)
   assert projection[second].is_cover is True
   assert projection[second].cover_selected_event_id == cover_event

@@ -57,7 +57,9 @@ def test_public_ticket_schemas_do_not_expose_internal_user_ids() -> None:
   assert "creator_user_id" not in schemas["TicketResponse"]["properties"]
   assert "created_by_user_id" not in schemas["TicketStatusResponse"]["properties"]
   assert "author_user_id" not in schemas["TicketCommentResponse"]["properties"]
-  assert "uploaded_by_user_id" not in schemas["TicketImageResponse"]["properties"]
+  image_fields = schemas["TicketImageResponse"]["properties"]
+  assert "uploaded_by_user_id" not in image_fields
+  assert {"width", "height", "is_cover"} <= image_fields.keys()
   assert "creator_user_id" in schemas["TicketInternalResponse"]["properties"]
 
 
