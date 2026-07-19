@@ -2,6 +2,7 @@ import uuid
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, Query, status
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_optional_current_user, role_required
@@ -42,7 +43,7 @@ async def get_all_offices(
   order: SortOrder = SortOrder.ASC,
   page_params: PageParams = Depends(get_page_params),
   search_params: SearchParams = Depends(get_search_params),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User | None = Depends(get_optional_current_user),
 ):
   """List offices; only administrators may request inactive records."""
@@ -63,7 +64,7 @@ async def get_all_offices(
 @router.get("/{office_id}", response_model=OfficeResponse)
 async def get_office(
   office_id: uuid.UUID,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User | None = Depends(get_optional_current_user),
 ):
   include_inactive = current_user is not None and current_user.role == Role.ADMIN
@@ -77,7 +78,7 @@ async def get_office(
 @router.post("", response_model=OfficeResponse, status_code=status.HTTP_201_CREATED)
 async def create_office(
   office_data: OfficeCreate,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
   return await OfficeService.create_office(db, office_data, current_user.id)
@@ -87,7 +88,7 @@ async def create_office(
 async def update_office(
   office_id: uuid.UUID,
   update_data: OfficeUpdate,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
   target_office = await OfficeService.get_office_by_id(
@@ -107,7 +108,7 @@ async def update_office(
 async def deactivate_office(
   office_id: uuid.UUID,
   request: OfficeDeactivateRequest,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
   await OfficeService.deactivate_office(
@@ -126,7 +127,7 @@ async def get_office_history(
   office_id: uuid.UUID,
   page_params: PageParams = Depends(get_page_params),
   date_range: DateRangeParams = Depends(get_history_date_range),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   _current_user: User = Depends(role_required(Role.ADMIN)),
 ):
   return await OfficeService.get_office_history(

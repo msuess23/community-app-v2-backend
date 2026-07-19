@@ -6,6 +6,7 @@ import uuid
 
 from fastapi import APIRouter, Body, Depends, File, Query, UploadFile, status
 from fastapi.responses import FileResponse
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user, get_optional_current_user
@@ -23,7 +24,7 @@ router = APIRouter()
 async def list_ticket_images(
   ticket_id: uuid.UUID,
   include_removed: bool = Query(False),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User | None = Depends(get_optional_current_user),
 ):
   """Lists active ticket images or the full staff audit view."""
@@ -44,7 +45,7 @@ async def list_ticket_images(
 async def upload_ticket_image(
   ticket_id: uuid.UUID,
   file: UploadFile = File(...),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(get_current_user),
 ):
   """Uploads an image and records immutable metadata in the ticket stream."""
@@ -59,7 +60,7 @@ async def upload_ticket_image(
 async def set_ticket_cover_image(
   ticket_id: uuid.UUID,
   image_id: uuid.UUID,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(get_current_user),
 ):
   """Select the image used as the ticket cover."""
@@ -80,7 +81,7 @@ async def remove_ticket_image(
   ticket_id: uuid.UUID,
   image_id: uuid.UUID,
   request: TicketImageRemoveRequest = Body(default_factory=TicketImageRemoveRequest),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(get_current_user),
 ):
   """Removes an image from the current projection without deleting its file."""
@@ -98,7 +99,7 @@ async def remove_ticket_image(
 async def get_ticket_image_content(
   ticket_id: uuid.UUID,
   image_id: uuid.UUID,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User | None = Depends(get_optional_current_user),
 ):
   """Streams current images and authorized historical image revisions."""

@@ -1,55 +1,51 @@
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.request_models import StrictRequestModel
-
-
-def _normalize_required(value: str) -> str:
-  normalized = " ".join(value.split())
-  if not normalized:
-    raise ValueError("value must not be blank")
-  return normalized
+from src.core.validation import (
+  NonNullableNormalizedUpdateText,
+  NormalizedRequiredText,
+)
 
 
 class AddressCreate(StrictRequestModel):
   """Creates an independent address record owned by another aggregate."""
 
-  street: str = Field(..., min_length=2, max_length=150)
-  house_number: str = Field(..., min_length=1, max_length=20)
-  zip_code: str = Field(..., min_length=4, max_length=10)
-  city: str = Field(..., min_length=2, max_length=100)
+  street: NormalizedRequiredText = Field(..., min_length=2, max_length=150)
+  house_number: NormalizedRequiredText = Field(..., min_length=1, max_length=20)
+  zip_code: NormalizedRequiredText = Field(..., min_length=4, max_length=10)
+  city: NormalizedRequiredText = Field(..., min_length=2, max_length=100)
   latitude: Optional[float] = Field(None, ge=-90.0, le=90.0)
   longitude: Optional[float] = Field(None, ge=-180.0, le=180.0)
-
-  @field_validator("street", "house_number", "zip_code", "city")
-  @classmethod
-  def normalize_strings(cls, value: str) -> str:
-    return _normalize_required(value)
 
 
 class AddressUpdate(StrictRequestModel):
   """Partially updates an address record."""
 
-  street: Optional[str] = Field(None, min_length=2, max_length=150)
-  house_number: Optional[str] = Field(None, min_length=1, max_length=20)
-  zip_code: Optional[str] = Field(None, min_length=4, max_length=10)
-  city: Optional[str] = Field(None, min_length=2, max_length=100)
+  street: NonNullableNormalizedUpdateText = Field(
+    None,
+    min_length=2,
+    max_length=150,
+  )
+  house_number: NonNullableNormalizedUpdateText = Field(
+    None,
+    min_length=1,
+    max_length=20,
+  )
+  zip_code: NonNullableNormalizedUpdateText = Field(
+    None,
+    min_length=4,
+    max_length=10,
+  )
+  city: NonNullableNormalizedUpdateText = Field(
+    None,
+    min_length=2,
+    max_length=100,
+  )
   latitude: Optional[float] = Field(None, ge=-90.0, le=90.0)
   longitude: Optional[float] = Field(None, ge=-180.0, le=180.0)
-
-  @field_validator("street", "house_number", "zip_code", "city", mode="before")
-  @classmethod
-  def reject_null_required_fields(cls, value: object) -> object:
-    if value is None:
-      raise ValueError("address text fields cannot be null")
-    return value
-
-  @field_validator("street", "house_number", "zip_code", "city")
-  @classmethod
-  def normalize_strings(cls, value: Optional[str]) -> Optional[str]:
-    return _normalize_required(value) if value is not None else None
 
 
 class AddressResponse(BaseModel):

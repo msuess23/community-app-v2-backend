@@ -29,7 +29,8 @@ Base = declarative_base()
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-  """Provides one transaction-scoped session per HTTP request."""
+  """Provide one transaction-scoped session and commit it before the response."""
+
   async with AsyncSessionLocal() as session:
     try:
       yield session

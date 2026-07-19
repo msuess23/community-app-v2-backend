@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import delete
@@ -44,12 +45,16 @@ class AuthRepository:
     db.add(reset_record)
 
   @staticmethod
-  async def get_refresh_token_by_hash(
+  async def consume_refresh_token(
     db: AsyncSession,
     token_hash: str,
   ) -> Optional[RefreshToken]:
+    """Atomically delete and return one refresh token for single-use rotation."""
+
     result = await db.execute(
-      select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+      delete(RefreshToken)
+      .where(RefreshToken.token_hash == token_hash)
+      .returning(RefreshToken)
     )
     return result.scalar_one_or_none()
 
@@ -74,3 +79,19 @@ class AuthRepository:
     await db.execute(
       delete(RefreshToken).where(RefreshToken.user_id == user_id)
     )
+
+  @staticmethod
+  async def delete_expired_records(
+    db: AsyncSession,
+    *,
+    now: datetime,
+  ) -> tuple[int, int]:
+    """Delete expired refresh tokens and password-reset challenges."""
+
+    refresh_result = await db.execute(
+      delete(RefreshToken).where(RefreshToken.expires_at <= now)
+    )
+    reset_result = await db.execute(
+      delete(PasswordReset).where(PasswordReset.expires_at <= now)
+    )
+    return refresh_result.rowcount or 0, reset_result.rowcount or 0

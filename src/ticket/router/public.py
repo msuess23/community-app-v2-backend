@@ -6,6 +6,7 @@ import uuid
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Body, Depends, Query, Response, status
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user, get_optional_current_user, role_required
@@ -51,7 +52,7 @@ async def list_public_tickets(
   page_params: PageParams = Depends(get_page_params),
   search_params: SearchParams = Depends(get_search_params),
   created_range: DateRangeParams = Depends(get_created_date_range),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User | None = Depends(get_optional_current_user),
 ):
   """List public community tickets using shared validated query parameters."""
@@ -81,7 +82,7 @@ async def list_my_tickets(
   order: SortOrder = SortOrder.DESC,
   page_params: PageParams = Depends(get_page_params),
   search_params: SearchParams = Depends(get_search_params),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(get_current_user),
 ):
   """List all public and private tickets created by the current user."""
@@ -102,7 +103,7 @@ async def list_my_tickets(
 @router.get("/{ticket_id}", response_model=TicketResponse)
 async def get_ticket(
   ticket_id: uuid.UUID,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User | None = Depends(get_optional_current_user),
 ):
   """Return a public ticket or a private ticket visible to the caller."""
@@ -113,7 +114,7 @@ async def get_ticket(
 @router.get("/{ticket_id}/status", response_model=list[TicketStatusResponse])
 async def get_ticket_status_history(
   ticket_id: uuid.UUID,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User | None = Depends(get_optional_current_user),
 ):
   """Return the reduced citizen-facing status history."""
@@ -128,7 +129,7 @@ async def get_ticket_status_history(
 async def get_current_ticket_status(
   ticket_id: uuid.UUID,
   response: Response,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User | None = Depends(get_optional_current_user),
 ):
   """Return the latest citizen-facing status or HTTP 204 if none exists."""
@@ -143,7 +144,7 @@ async def get_current_ticket_status(
 async def respond_to_ticket_question(
   ticket_id: uuid.UUID,
   request: TicketCitizenResponseRequest,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.CITIZEN)),
 ):
   """Let the ticket creator answer the currently pending authority question."""
@@ -161,7 +162,7 @@ async def respond_to_ticket_question(
 @router.post("", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
 async def create_ticket(
   request: TicketCreateRequest,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.CITIZEN)),
 ):
   """Submit a ticket to the dispatcher inbox without an office selection."""
@@ -173,7 +174,7 @@ async def create_ticket(
 async def update_ticket(
   ticket_id: uuid.UUID,
   request: TicketUpdateRequest,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.CITIZEN)),
 ):
   """Update a citizen ticket before it has been dispatched."""
@@ -185,7 +186,7 @@ async def update_ticket(
 async def cancel_ticket(
   ticket_id: uuid.UUID,
   request: TicketCancelRequest = Body(default_factory=TicketCancelRequest),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.CITIZEN)),
 ):
   """Cancel a ticket while it is still waiting in the central inbox."""

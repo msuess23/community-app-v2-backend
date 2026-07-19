@@ -188,3 +188,34 @@ async def test_only_manager_can_complete_as_rejected(monkeypatch) -> None:
       ),
       officer,
     )
+
+
+@pytest.mark.asyncio
+async def test_current_assignee_can_return_ticket_to_dispatch(monkeypatch) -> None:
+  from src.ticket.schemas import ReturnToDispatchAction
+
+  db = AsyncMock()
+  officer = _user(Role.OFFICER, office_id=uuid4())
+  ticket = _ticket(uuid4(), coordinator_id=officer.id)
+  ticket.office_id = officer.office_id
+  staged: list[TicketEvent] = []
+  monkeypatch.setattr(
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
+    AsyncMock(return_value=ticket),
+  )
+  _mock_event_writes(monkeypatch, staged)
+
+  await TicketWorkflowCommandService.return_to_dispatch(
+    db,
+    ticket.id,
+    ReturnToDispatchAction(
+      action=TicketWorkflowAction.RETURN_TO_DISPATCH,
+      reason="Wrong authority",
+    ),
+    officer,
+  )
+
+  assert ticket.office_id is None
+  assert ticket.primary_officer_id is None
+  assert ticket.workflow_state == TicketWorkflowState.NEW
+  assert staged[-1].event_type == TicketEventType.TICKET_RETURNED_TO_DISPATCH

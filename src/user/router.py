@@ -2,6 +2,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user, role_required
@@ -43,7 +44,7 @@ async def get_my_profile(
 async def update_my_profile(
   update_data: UserUpdate,
   current_user: User = Depends(get_current_user),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
 ):
   return await UserService.update_user_profile(
     db,
@@ -62,7 +63,7 @@ async def get_all_users(
   order: SortOrder = SortOrder.ASC,
   page_params: PageParams = Depends(get_page_params),
   search_params: SearchParams = Depends(get_search_params),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(*AUTHORITY_ROLES)),
 ):
   """List users with role-scoped visibility and validated filters."""
@@ -92,7 +93,7 @@ async def get_user(
 async def update_user_by_admin(
   user_id: uuid.UUID,
   update_data: AdminUserUpdate,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
   target_user = await UserService.get_user_by_id(db, user_id)
@@ -108,7 +109,7 @@ async def update_user_by_admin(
 async def deactivate_user(
   user_id: uuid.UUID,
   request: UserDeactivateRequest,
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
   await UserService.deactivate_user(
@@ -127,7 +128,7 @@ async def get_user_history(
   user_id: uuid.UUID,
   page_params: PageParams = Depends(get_page_params),
   date_range: DateRangeParams = Depends(get_history_date_range),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
   _current_user: User = Depends(role_required(Role.ADMIN)),
 ):
   return await UserService.get_user_history(

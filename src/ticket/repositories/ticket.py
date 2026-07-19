@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, Tuple
 
-from sqlalchemy import and_, exists, false, or_
+from sqlalchemy import exists, false, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -16,6 +16,7 @@ from src.core.filters import SortOrder, apply_bbox_filter, apply_search_filter
 from src.core.pagination import execute_page
 from src.ticket.domain import (
   TicketCategory,
+  TicketLifecycleFilter,
   TicketStatus,
   TicketVisibility,
   TicketWorkflowState,
@@ -191,7 +192,7 @@ class TicketProjectionRepository:
 
   @staticmethod
   def _staff_scope(current_user: User):
-    """Build the role-scoped predicate used by the authority work queue."""
+    """Build the immutable role scope used by all internal ticket searches."""
 
     if current_user.role == Role.DISPATCHER:
       return Ticket.workflow_state.in_(
@@ -201,26 +202,19 @@ class TicketProjectionRepository:
         }
       )
 
-    active_ticket = Ticket.workflow_state != TicketWorkflowState.COMPLETED
     if current_user.role == Role.MANAGER:
-      return and_(
-        active_ticket,
-        or_(
-          Ticket.office_id == current_user.office_id,
-          Ticket.primary_officer_id == current_user.id,
-          Ticket.current_assignee_id == current_user.id,
-          Ticket.return_to_user_id == current_user.id,
-        ),
+      return or_(
+        Ticket.office_id == current_user.office_id,
+        Ticket.primary_officer_id == current_user.id,
+        Ticket.current_assignee_id == current_user.id,
+        Ticket.return_to_user_id == current_user.id,
       )
 
     if current_user.role == Role.OFFICER:
-      return and_(
-        active_ticket,
-        or_(
-          Ticket.primary_officer_id == current_user.id,
-          Ticket.current_assignee_id == current_user.id,
-          Ticket.return_to_user_id == current_user.id,
-        ),
+      return or_(
+        Ticket.primary_officer_id == current_user.id,
+        Ticket.current_assignee_id == current_user.id,
+        Ticket.return_to_user_id == current_user.id,
       )
 
     return false()
@@ -232,18 +226,32 @@ class TicketProjectionRepository:
     current_user: User,
     page: int,
     size: int,
+    lifecycle: TicketLifecycleFilter = TicketLifecycleFilter.ACTIVE,
     workflow_state: TicketWorkflowState | None = None,
     status: TicketStatus | None = None,
     category: TicketCategory | None = None,
+    office_id: uuid.UUID | None = None,
+    creator_user_id: uuid.UUID | None = None,
+    primary_officer_id: uuid.UUID | None = None,
+    current_assignee_id: uuid.UUID | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    updated_from: datetime | None = None,
+    updated_to: datetime | None = None,
     search: str | None = None,
     sort_by: TicketSortField = TicketSortField.UPDATED_AT,
     order: SortOrder = SortOrder.DESC,
   ) -> tuple[list[Ticket], int]:
-    """Return the role-scoped active work queue for the authority client."""
+    """Return a role-scoped internal page for active work or archive research."""
 
     query = TicketProjectionRepository._detail_query().where(
       TicketProjectionRepository._staff_scope(current_user)
     )
+    if lifecycle == TicketLifecycleFilter.ACTIVE:
+      query = query.where(Ticket.workflow_state != TicketWorkflowState.COMPLETED)
+    elif lifecycle == TicketLifecycleFilter.COMPLETED:
+      query = query.where(Ticket.workflow_state == TicketWorkflowState.COMPLETED)
+
     query = apply_search_filter(query, search, Ticket.title, Ticket.description)
     if workflow_state is not None:
       query = query.where(Ticket.workflow_state == workflow_state)
@@ -251,6 +259,22 @@ class TicketProjectionRepository:
       query = query.where(Ticket.public_status == status)
     if category is not None:
       query = query.where(Ticket.category == category)
+    if office_id is not None:
+      query = query.where(Ticket.office_id == office_id)
+    if creator_user_id is not None:
+      query = query.where(Ticket.creator_user_id == creator_user_id)
+    if primary_officer_id is not None:
+      query = query.where(Ticket.primary_officer_id == primary_officer_id)
+    if current_assignee_id is not None:
+      query = query.where(Ticket.current_assignee_id == current_assignee_id)
+    if created_from is not None:
+      query = query.where(Ticket.created_at >= created_from)
+    if created_to is not None:
+      query = query.where(Ticket.created_at <= created_to)
+    if updated_from is not None:
+      query = query.where(Ticket.updated_at >= updated_from)
+    if updated_to is not None:
+      query = query.where(Ticket.updated_at <= updated_to)
 
     return await execute_page(
       db,

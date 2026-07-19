@@ -8,7 +8,7 @@ from src.ticket.router.public import router as public_router
 from src.ticket.router.workflow import router as workflow_router
 
 router = APIRouter()
-# Register the fixed /work-queue route before the generic /{ticket_id} route.
+# Register fixed internal search routes before the generic /{ticket_id} route.
 for child_router in (
   workflow_router,
   public_router,

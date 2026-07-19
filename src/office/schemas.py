@@ -5,31 +5,20 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from src.address.schemas import AddressCreate, AddressResponse, AddressUpdate
 from src.address.snapshot import AddressSnapshot
-from src.address.schemas import (
-  AddressCreate,
-  AddressResponse,
-  AddressUpdate,
-)
 from src.core.request_models import StrictRequestModel
 from src.core.schemas import BaseMetadataResponse
+from src.core.validation import (
+  ChangeReason,
+  NonNullableNormalizedUpdateText,
+  NormalizedOptionalText,
+  NormalizedRequiredText,
+  normalize_required_text,
+)
 
 
 _OPENING_INTERVAL = re.compile(r"^(\d{2}):(\d{2})-(\d{2}):(\d{2})$")
-
-
-def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
-  if value is None:
-    return None
-  normalized = " ".join(value.split())
-  return normalized or None
-
-
-def _normalize_required_text(value: str) -> str:
-  normalized = " ".join(value.split())
-  if not normalized:
-    raise ValueError("value must not be blank")
-  return normalized
 
 
 def _normalize_opening_hours(value: Optional[str]) -> Optional[str]:
@@ -82,22 +71,16 @@ class OpeningHours(StrictRequestModel):
 
 
 class OfficeBase(StrictRequestModel):
-  name: str = Field(..., min_length=3, max_length=150)
-  description: Optional[str] = Field(None, max_length=1000)
+  name: NormalizedRequiredText = Field(..., min_length=3, max_length=150)
+  description: NormalizedOptionalText = Field(None, max_length=1000)
   contact_email: Optional[EmailStr] = None
-  phone: Optional[str] = Field(None, max_length=50, pattern=r"^\+?[0-9\s\-\(\)]+$")
+  phone: NormalizedOptionalText = Field(
+    None,
+    max_length=50,
+    pattern=r"^\+?[0-9\s\-\(\)]+$",
+  )
   services: list[str] = Field(default_factory=list, max_length=50)
   opening_hours: Optional[OpeningHours] = None
-
-  @field_validator("name")
-  @classmethod
-  def normalize_name(cls, value: str) -> str:
-    return _normalize_required_text(value)
-
-  @field_validator("description", "phone")
-  @classmethod
-  def normalize_optional_fields(cls, value: Optional[str]) -> Optional[str]:
-    return _normalize_optional_text(value)
 
   @field_validator("services")
   @classmethod
@@ -105,7 +88,7 @@ class OfficeBase(StrictRequestModel):
     result: list[str] = []
     seen: set[str] = set()
     for value in values:
-      normalized = _normalize_required_text(value)
+      normalized = normalize_required_text(value)
       if len(normalized) > 100:
         raise ValueError("service entries must not exceed 100 characters")
       key = normalized.casefold()
@@ -120,56 +103,38 @@ class OfficeCreate(OfficeBase):
 
 
 class OfficeUpdate(StrictRequestModel):
-  name: Optional[str] = Field(None, min_length=3, max_length=150)
-  description: Optional[str] = Field(None, max_length=1000)
+  name: NonNullableNormalizedUpdateText = Field(
+    None,
+    min_length=3,
+    max_length=150,
+  )
+  description: NormalizedOptionalText = Field(None, max_length=1000)
   contact_email: Optional[EmailStr] = None
-  phone: Optional[str] = Field(None, max_length=50, pattern=r"^\+?[0-9\s\-\(\)]+$")
+  phone: NormalizedOptionalText = Field(
+    None,
+    max_length=50,
+    pattern=r"^\+?[0-9\s\-\(\)]+$",
+  )
   services: Optional[list[str]] = Field(None, max_length=50)
   opening_hours: Optional[OpeningHours] = None
   address: Optional[AddressUpdate] = None
-  change_reason: str = Field(..., min_length=3, max_length=500)
+  change_reason: ChangeReason
 
-  @field_validator("name", "services", mode="before")
+  @field_validator("services", mode="before")
   @classmethod
-  def reject_null_required_update_fields(cls, value: object) -> object:
+  def reject_null_services(cls, value: object) -> object:
     if value is None:
-      raise ValueError("name and services cannot be null")
+      raise ValueError("services cannot be null")
     return value
-
-  @field_validator("name")
-  @classmethod
-  def normalize_name(cls, value: Optional[str]) -> Optional[str]:
-    return _normalize_required_text(value) if value is not None else None
-
-  @field_validator("description", "phone")
-  @classmethod
-  def normalize_optional_fields(cls, value: Optional[str]) -> Optional[str]:
-    return _normalize_optional_text(value)
 
   @field_validator("services")
   @classmethod
   def normalize_services(cls, values: Optional[list[str]]) -> Optional[list[str]]:
     return OfficeBase.normalize_services(values) if values is not None else None
 
-  @field_validator("change_reason")
-  @classmethod
-  def normalize_change_reason(cls, value: str) -> str:
-    normalized = _normalize_required_text(value)
-    if len(normalized) < 3:
-      raise ValueError("change_reason must contain at least 3 characters")
-    return normalized
-
 
 class OfficeDeactivateRequest(StrictRequestModel):
-  change_reason: str = Field(..., min_length=3, max_length=500)
-
-  @field_validator("change_reason")
-  @classmethod
-  def normalize_change_reason(cls, value: str) -> str:
-    normalized = _normalize_required_text(value)
-    if len(normalized) < 3:
-      raise ValueError("change_reason must contain at least 3 characters")
-    return normalized
+  change_reason: ChangeReason
 
 
 class OfficeResponse(BaseMetadataResponse):

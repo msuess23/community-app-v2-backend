@@ -168,3 +168,56 @@ def test_rebuild_ticket_replays_simplified_event_stream() -> None:
   assert state.creator_user_id == creator
   assert state.public_status == TicketStatus.CANCELLED
   assert state.version == 2
+
+
+def test_primary_officer_reassignment_updates_matching_return_targets() -> None:
+  from src.ticket.domain import PrimaryOfficerReassignedPayload
+
+  now = datetime.now(timezone.utc)
+  state, previous = _active_state(now)
+  temporary_assignee = uuid4()
+  replacement = uuid4()
+  state.current_assignee_id = temporary_assignee
+  state.return_to_user_id = previous
+
+  state = evolve_ticket(
+    state,
+    TicketEventType.PRIMARY_OFFICER_REASSIGNED,
+    PrimaryOfficerReassignedPayload(
+      previous_primary_officer_id=previous,
+      new_primary_officer_id=replacement,
+      comment="Long-term substitution",
+    ),
+    occurred_at=now + timedelta(minutes=3),
+  )
+
+  assert state.primary_officer_id == replacement
+  assert state.current_assignee_id == temporary_assignee
+  assert state.return_to_user_id == replacement
+
+
+def test_return_to_dispatch_clears_office_ownership_for_redispatch() -> None:
+  from src.ticket.domain import TicketReturnedToDispatchPayload
+
+  now = datetime.now(timezone.utc)
+  state, primary = _active_state(now)
+  previous_office = state.office_id
+  assert previous_office is not None
+
+  state = evolve_ticket(
+    state,
+    TicketEventType.TICKET_RETURNED_TO_DISPATCH,
+    TicketReturnedToDispatchPayload(
+      previous_office_id=previous_office,
+      previous_primary_officer_id=primary,
+      reason="Wrong authority",
+    ),
+    occurred_at=now + timedelta(minutes=3),
+  )
+
+  assert state.office_id is None
+  assert state.primary_officer_id is None
+  assert state.current_assignee_id is None
+  assert state.return_to_user_id is None
+  assert state.workflow_state == TicketWorkflowState.NEW
+  assert state.public_status == TicketStatus.IN_PROGRESS

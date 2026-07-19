@@ -60,6 +60,22 @@ class PrimaryOfficerAssignedPayload(BaseModel):
   comment: str | None = None
 
 
+class PrimaryOfficerReassignedPayload(BaseModel):
+  """Replaces the permanent case owner while preserving temporary workflow steps."""
+
+  previous_primary_officer_id: UUID
+  new_primary_officer_id: UUID
+  comment: str | None = None
+
+
+class TicketReturnedToDispatchPayload(BaseModel):
+  """Returns a wrongly assigned ticket to the central dispatcher inbox."""
+
+  previous_office_id: UUID
+  previous_primary_officer_id: UUID | None = None
+  reason: str
+
+
 class TicketForwardedPayload(BaseModel):
   """Moves overall coordination without changing permanent ownership."""
 
@@ -158,6 +174,8 @@ EventPayload: TypeAlias = (
   | TicketCancelledPayload
   | TicketDispatchedPayload
   | PrimaryOfficerAssignedPayload
+  | PrimaryOfficerReassignedPayload
+  | TicketReturnedToDispatchPayload
   | TicketForwardedPayload
   | CosignatureRequestedPayload
   | TicketCosignedPayload
@@ -179,6 +197,8 @@ _EVENT_PAYLOAD_TYPES: dict[TicketEventType, type[BaseModel]] = {
   TicketEventType.TICKET_CANCELLED: TicketCancelledPayload,
   TicketEventType.TICKET_DISPATCHED: TicketDispatchedPayload,
   TicketEventType.PRIMARY_OFFICER_ASSIGNED: PrimaryOfficerAssignedPayload,
+  TicketEventType.PRIMARY_OFFICER_REASSIGNED: PrimaryOfficerReassignedPayload,
+  TicketEventType.TICKET_RETURNED_TO_DISPATCH: TicketReturnedToDispatchPayload,
   TicketEventType.TICKET_FORWARDED: TicketForwardedPayload,
   TicketEventType.COSIGNATURE_REQUESTED: CosignatureRequestedPayload,
   TicketEventType.TICKET_COSIGNED: TicketCosignedPayload,

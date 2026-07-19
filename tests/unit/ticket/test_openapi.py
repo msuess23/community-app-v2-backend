@@ -6,7 +6,7 @@ def test_ticket_openapi_exposes_public_and_workflow_endpoints() -> None:
 
   assert "/api/v1/tickets" in paths
   assert "/api/v1/tickets/mine" in paths
-  assert "/api/v1/tickets/work-queue" in paths
+  assert "/api/v1/tickets/internal" in paths
   assert "/api/v1/tickets/{ticket_id}/internal" in paths
   assert "/api/v1/tickets/{ticket_id}/events" in paths
   assert "/api/v1/tickets/{ticket_id}/workflow" in paths
@@ -30,7 +30,7 @@ def test_ticket_openapi_uses_snake_case_contract() -> None:
   }
   queue_parameters = {
     parameter["name"]
-    for parameter in spec["paths"]["/api/v1/tickets/work-queue"]["get"]["parameters"]
+    for parameter in spec["paths"]["/api/v1/tickets/internal"]["get"]["parameters"]
   }
   ticket_fields = set(
     spec["components"]["schemas"]["TicketResponse"]["properties"]
@@ -40,7 +40,19 @@ def test_ticket_openapi_uses_snake_case_contract() -> None:
   )
 
   assert {"office_id", "created_from", "created_to", "sort_by"} <= public_parameters
-  assert {"workflow_state", "sort_by"} <= queue_parameters
+  assert {
+    "lifecycle",
+    "workflow_state",
+    "office_id",
+    "creator_user_id",
+    "primary_officer_id",
+    "current_assignee_id",
+    "created_from",
+    "created_to",
+    "updated_from",
+    "updated_to",
+    "sort_by",
+  } <= queue_parameters
   assert {"current_status", "image_url"} <= ticket_fields
   assert "creator_user_id" not in ticket_fields
   internal_fields = set(

@@ -23,12 +23,14 @@ from src.ticket.domain.payloads import (
   CosignatureRequestedPayload,
   EscalationDecisionPayload,
   PrimaryOfficerAssignedPayload,
+  PrimaryOfficerReassignedPayload,
   TicketCompletedPayload,
   TicketCosignedPayload,
   TicketDetailsUpdatedPayload,
   TicketDispatchedPayload,
   TicketEscalatedPayload,
   TicketForwardedPayload,
+  TicketReturnedToDispatchPayload,
   TicketSubmittedPayload,
   validate_event_payload,
 )
@@ -123,6 +125,31 @@ def evolve_ticket(
     next_state.primary_officer_id = assigned.primary_officer_id
     next_state.current_assignee_id = assigned.primary_officer_id
     next_state.workflow_state = TicketWorkflowState.IN_PROGRESS
+  elif event_type == TicketEventType.PRIMARY_OFFICER_REASSIGNED:
+    reassigned = validated
+    assert isinstance(reassigned, PrimaryOfficerReassignedPayload)
+    if next_state.primary_officer_id != reassigned.previous_primary_officer_id:
+      raise ValueError("PRIMARY_OFFICER_REASSIGNED does not match current ownership")
+    next_state.primary_officer_id = reassigned.new_primary_officer_id
+    if (
+      next_state.workflow_state == TicketWorkflowState.IN_PROGRESS
+      and next_state.current_assignee_id == reassigned.previous_primary_officer_id
+    ):
+      next_state.current_assignee_id = reassigned.new_primary_officer_id
+    if next_state.return_to_user_id == reassigned.previous_primary_officer_id:
+      next_state.return_to_user_id = reassigned.new_primary_officer_id
+  elif event_type == TicketEventType.TICKET_RETURNED_TO_DISPATCH:
+    returned = validated
+    assert isinstance(returned, TicketReturnedToDispatchPayload)
+    if next_state.office_id != returned.previous_office_id:
+      raise ValueError("TICKET_RETURNED_TO_DISPATCH does not match current office")
+    next_state.office_id = None
+    next_state.primary_officer_id = None
+    next_state.current_assignee_id = None
+    next_state.return_to_user_id = None
+    next_state.workflow_state = TicketWorkflowState.NEW
+    next_state.public_status = TicketStatus.IN_PROGRESS
+    next_state.public_status_message = "Ticket returned for reassignment"
   elif event_type == TicketEventType.TICKET_FORWARDED:
     forwarded = validated
     assert isinstance(forwarded, TicketForwardedPayload)

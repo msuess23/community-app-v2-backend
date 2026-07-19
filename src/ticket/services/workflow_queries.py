@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +12,7 @@ from src.core.filters import SortOrder
 from src.core.schemas import PaginatedResponse
 from src.ticket.domain import (
   TicketCategory,
+  TicketLifecycleFilter,
   TicketStatus,
   TicketWorkflowAction,
   TicketWorkflowState,
@@ -49,10 +51,15 @@ class TicketWorkflowQueryService:
     if (
       current_user.role == Role.MANAGER
       and current_user.office_id == ticket.office_id
-      and ticket.primary_officer_id is None
-      and ticket.workflow_state == TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT
+      and ticket.workflow_state != TicketWorkflowState.COMPLETED
     ):
-      actions.append(TicketWorkflowAction.ASSIGN_PRIMARY_OFFICER)
+      if (
+        ticket.primary_officer_id is None
+        and ticket.workflow_state == TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT
+      ):
+        actions.append(TicketWorkflowAction.ASSIGN_PRIMARY_OFFICER)
+      elif ticket.primary_officer_id is not None:
+        actions.append(TicketWorkflowAction.REASSIGN_PRIMARY_OFFICER)
 
     is_assignee = (
       current_user.role in CASE_WORKER_ROLES
@@ -65,6 +72,7 @@ class TicketWorkflowQueryService:
           TicketWorkflowAction.REQUEST_COSIGNATURE,
           TicketWorkflowAction.ESCALATE,
           TicketWorkflowAction.REQUEST_CITIZEN_RESPONSE,
+          TicketWorkflowAction.RETURN_TO_DISPATCH,
           TicketWorkflowAction.COMPLETE,
         ]
       )
@@ -106,38 +114,59 @@ class TicketWorkflowQueryService:
     )
 
   @staticmethod
-  async def list_work_queue(
+  async def list_internal_tickets(
     db: AsyncSession,
     *,
     current_user: User,
     page: int,
     size: int,
+    lifecycle: TicketLifecycleFilter = TicketLifecycleFilter.ACTIVE,
     workflow_state: TicketWorkflowState | None = None,
     status: TicketStatus | None = None,
     category: TicketCategory | None = None,
+    office_id: uuid.UUID | None = None,
+    creator_user_id: uuid.UUID | None = None,
+    primary_officer_id: uuid.UUID | None = None,
+    current_assignee_id: uuid.UUID | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    updated_from: datetime | None = None,
+    updated_to: datetime | None = None,
     search: str | None = None,
     sort_by: TicketSortField = TicketSortField.UPDATED_AT,
     order: SortOrder = SortOrder.DESC,
   ) -> PaginatedResponse[TicketInternalResponse]:
-    """List the role-scoped administrative work queue."""
+    """List role-scoped active tickets or the searchable authority archive."""
 
     if current_user.role not in AUTHORITY_ROLES:
-      raise ForbiddenException("This account has no ticket work queue")
+      raise ForbiddenException("This account has no internal ticket access")
 
     tickets, total = await TicketProjectionRepository.get_staff_page(
       db,
       current_user=current_user,
       page=page,
       size=size,
+      lifecycle=lifecycle,
       workflow_state=workflow_state,
       status=status,
       category=category,
+      office_id=office_id,
+      creator_user_id=creator_user_id,
+      primary_officer_id=primary_officer_id,
+      current_assignee_id=current_assignee_id,
+      created_from=created_from,
+      created_to=created_to,
+      updated_from=updated_from,
+      updated_to=updated_to,
       search=search,
       sort_by=sort_by,
       order=order,
     )
     latest = latest_status_events(
-      await TicketEventRepository.get_events_for_tickets(db, [ticket.id for ticket in tickets])
+      await TicketEventRepository.get_events_for_tickets(
+        db,
+        [ticket.id for ticket in tickets],
+      )
     )
     data = [
       TicketResponseMapper.to_internal_ticket(

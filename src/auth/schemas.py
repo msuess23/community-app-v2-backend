@@ -2,6 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from src.core.request_models import StrictRequestModel
 from src.core.security import ensure_bcrypt_compatible, normalize_email
 
 
@@ -11,15 +12,15 @@ class TokenResponse(BaseModel):
   token_type: str = "bearer"
 
 
-class RefreshTokenRequest(BaseModel):
+class RefreshTokenRequest(StrictRequestModel):
   refresh_token: str = Field(..., min_length=32, max_length=512)
 
 
-class LogoutRequest(BaseModel):
+class LogoutRequest(StrictRequestModel):
   refresh_token: str = Field(..., min_length=32, max_length=512)
 
 
-class ForgotPasswordRequest(BaseModel):
+class ForgotPasswordRequest(StrictRequestModel):
   email: EmailStr
 
   @field_validator("email")
@@ -28,7 +29,7 @@ class ForgotPasswordRequest(BaseModel):
     return normalize_email(str(value))
 
 
-class ResetPasswordRequest(BaseModel):
+class ResetPasswordRequest(StrictRequestModel):
   email: EmailStr
   otp: str = Field(..., pattern=r"^[0-9]{6}$")
   new_password: str = Field(..., min_length=8, max_length=128)

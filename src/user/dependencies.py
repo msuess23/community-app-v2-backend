@@ -3,6 +3,7 @@
 import uuid
 
 from fastapi import Depends, Path
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
@@ -16,7 +17,7 @@ from src.user.repository import UserRepository
 async def get_target_user_if_allowed(
   user_id: uuid.UUID = Path(...),
   current_user: User = Depends(get_current_user),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
 ) -> User:
   """Load a target user while hiding inaccessible profiles as forbidden."""
 

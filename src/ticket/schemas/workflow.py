@@ -6,17 +6,16 @@ from datetime import datetime
 from typing import Annotated, Any, Literal, TypeAlias
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from src.core.request_models import StrictRequestModel
-
+from src.core.validation import NormalizedOptionalText, NormalizedRequiredText
 from src.ticket.domain import (
   EscalationDecision,
   TicketCompletionOutcome,
   TicketEventType,
   TicketWorkflowAction,
 )
-from src.core.validation import normalize_optional_text, normalize_required_text
 from src.ticket.schemas.ticket import TicketInternalResponse
 
 
@@ -24,24 +23,14 @@ class TicketDispatchRequest(StrictRequestModel):
   """Dispatcher command that selects the responsible authority."""
 
   office_id: UUID
-  comment: str | None = Field(None, max_length=1000)
-
-  @field_validator("comment")
-  @classmethod
-  def normalize_comment(cls, value: str | None) -> str | None:
-    return normalize_optional_text(value)
+  comment: NormalizedOptionalText = Field(None, max_length=1000)
 
 
 class PrimaryOfficerAssignmentRequest(StrictRequestModel):
-  """Manager command that selects the permanent case owner."""
+  """Manager command that selects or replaces the permanent case owner."""
 
   primary_officer_id: UUID
-  comment: str | None = Field(None, max_length=1000)
-
-  @field_validator("comment")
-  @classmethod
-  def normalize_comment(cls, value: str | None) -> str | None:
-    return normalize_optional_text(value)
+  comment: NormalizedOptionalText = Field(None, max_length=1000)
 
 
 class ForwardTicketAction(StrictRequestModel):
@@ -49,12 +38,7 @@ class ForwardTicketAction(StrictRequestModel):
 
   action: Literal[TicketWorkflowAction.FORWARD]
   target_user_id: UUID
-  comment: str | None = Field(None, max_length=1000)
-
-  @field_validator("comment")
-  @classmethod
-  def normalize_comment(cls, value: str | None) -> str | None:
-    return normalize_optional_text(value)
+  comment: NormalizedOptionalText = Field(None, max_length=1000)
 
 
 class RequestCosignatureAction(StrictRequestModel):
@@ -62,24 +46,14 @@ class RequestCosignatureAction(StrictRequestModel):
 
   action: Literal[TicketWorkflowAction.REQUEST_COSIGNATURE]
   target_user_id: UUID
-  comment: str | None = Field(None, max_length=1000)
-
-  @field_validator("comment")
-  @classmethod
-  def normalize_comment(cls, value: str | None) -> str | None:
-    return normalize_optional_text(value)
+  comment: NormalizedOptionalText = Field(None, max_length=1000)
 
 
 class CosignTicketAction(StrictRequestModel):
   """Records the requested cosignature and returns the case."""
 
   action: Literal[TicketWorkflowAction.COSIGN]
-  comment: str | None = Field(None, max_length=1000)
-
-  @field_validator("comment")
-  @classmethod
-  def normalize_comment(cls, value: str | None) -> str | None:
-    return normalize_optional_text(value)
+  comment: NormalizedOptionalText = Field(None, max_length=1000)
 
 
 class EscalateTicketAction(StrictRequestModel):
@@ -87,12 +61,7 @@ class EscalateTicketAction(StrictRequestModel):
 
   action: Literal[TicketWorkflowAction.ESCALATE]
   manager_user_id: UUID
-  reason: str = Field(..., min_length=3, max_length=1000)
-
-  @field_validator("reason")
-  @classmethod
-  def normalize_reason(cls, value: str) -> str:
-    return normalize_required_text(value)
+  reason: NormalizedRequiredText = Field(..., min_length=3, max_length=1000)
 
 
 class DecideEscalationAction(StrictRequestModel):
@@ -100,24 +69,21 @@ class DecideEscalationAction(StrictRequestModel):
 
   action: Literal[TicketWorkflowAction.DECIDE_ESCALATION]
   decision: EscalationDecision
-  comment: str | None = Field(None, max_length=1000)
-
-  @field_validator("comment")
-  @classmethod
-  def normalize_comment(cls, value: str | None) -> str | None:
-    return normalize_optional_text(value)
+  comment: NormalizedOptionalText = Field(None, max_length=1000)
 
 
 class RequestCitizenResponseAction(StrictRequestModel):
   """Pauses staff processing until the citizen answers a question."""
 
   action: Literal[TicketWorkflowAction.REQUEST_CITIZEN_RESPONSE]
-  question: str = Field(..., min_length=3, max_length=1000)
+  question: NormalizedRequiredText = Field(..., min_length=3, max_length=1000)
 
-  @field_validator("question")
-  @classmethod
-  def normalize_question(cls, value: str) -> str:
-    return normalize_required_text(value)
+
+class ReturnToDispatchAction(StrictRequestModel):
+  """Returns a wrongly assigned active ticket to the central inbox."""
+
+  action: Literal[TicketWorkflowAction.RETURN_TO_DISPATCH]
+  reason: NormalizedRequiredText = Field(..., min_length=3, max_length=1000)
 
 
 class CompleteTicketAction(StrictRequestModel):
@@ -125,12 +91,7 @@ class CompleteTicketAction(StrictRequestModel):
 
   action: Literal[TicketWorkflowAction.COMPLETE]
   outcome: TicketCompletionOutcome
-  message: str = Field(..., min_length=3, max_length=1000)
-
-  @field_validator("message")
-  @classmethod
-  def normalize_message(cls, value: str) -> str:
-    return normalize_required_text(value)
+  message: NormalizedRequiredText = Field(..., min_length=3, max_length=1000)
 
 
 TicketWorkflowRequest: TypeAlias = Annotated[
@@ -140,6 +101,7 @@ TicketWorkflowRequest: TypeAlias = Annotated[
   | EscalateTicketAction
   | DecideEscalationAction
   | RequestCitizenResponseAction
+  | ReturnToDispatchAction
   | CompleteTicketAction,
   Field(discriminator="action"),
 ]
@@ -166,9 +128,4 @@ class TicketInternalDetailResponse(TicketInternalResponse):
 class TicketCitizenResponseRequest(StrictRequestModel):
   """Citizen answer to the currently pending authority question."""
 
-  message: str = Field(..., min_length=1, max_length=2000)
-
-  @field_validator("message")
-  @classmethod
-  def normalize_message(cls, value: str) -> str:
-    return normalize_required_text(value)
+  message: NormalizedRequiredText = Field(..., min_length=1, max_length=2000)

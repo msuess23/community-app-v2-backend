@@ -14,12 +14,14 @@ from src.ticket.domain import (
   CosignatureRequestedPayload,
   EscalationDecisionPayload,
   PrimaryOfficerAssignedPayload,
+  PrimaryOfficerReassignedPayload,
   TicketCompletedPayload,
   TicketCosignedPayload,
   TicketDispatchedPayload,
   TicketEscalatedPayload,
   TicketEventType,
   TicketForwardedPayload,
+  TicketReturnedToDispatchPayload,
   TicketWorkflowState,
 )
 from src.ticket.models import Ticket, TicketEvent
@@ -32,6 +34,7 @@ from src.ticket.schemas import (
   PrimaryOfficerAssignmentRequest,
   RequestCitizenResponseAction,
   RequestCosignatureAction,
+  ReturnToDispatchAction,
   TicketCitizenResponseRequest,
   TicketDispatchRequest,
   TicketWorkflowRequest,
@@ -123,19 +126,15 @@ class TicketWorkflowCommandService:
     request: PrimaryOfficerAssignmentRequest,
     current_user: User,
   ) -> Ticket:
-    """Let the responsible office manager select the permanent case owner."""
+    """Assign or replace the permanent case owner for the responsible office."""
 
     if current_user.role != Role.MANAGER:
       raise ForbiddenException("Only managers may assign a primary officer")
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    if (
-      ticket.workflow_state != TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT
-      or ticket.office_id is None
-      or ticket.primary_officer_id is not None
-    ):
+    if ticket.office_id is None or ticket.workflow_state == TicketWorkflowState.COMPLETED:
       raise WorkflowValidationException(
-        "The ticket is not waiting for its initial primary officer."
+        "Only an active ticket assigned to an office may receive a primary officer."
       )
     if current_user.office_id != ticket.office_id:
       raise ForbiddenException("Only a manager of the assigned office may act")
@@ -153,15 +152,34 @@ class TicketWorkflowCommandService:
         "The primary officer must be an active officer of the assigned office."
       )
 
+    if ticket.primary_officer_id is None:
+      if ticket.workflow_state != TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT:
+        raise WorkflowValidationException(
+          "The ticket is not waiting for its initial primary officer."
+        )
+      event_type = TicketEventType.PRIMARY_OFFICER_ASSIGNED
+      payload = PrimaryOfficerAssignedPayload(
+        primary_officer_id=officer.id,
+        comment=request.comment,
+      )
+    else:
+      if ticket.primary_officer_id == officer.id:
+        raise WorkflowValidationException(
+          "The selected officer is already the primary officer."
+        )
+      event_type = TicketEventType.PRIMARY_OFFICER_REASSIGNED
+      payload = PrimaryOfficerReassignedPayload(
+        previous_primary_officer_id=ticket.primary_officer_id,
+        new_primary_officer_id=officer.id,
+        comment=request.comment,
+      )
+
     await TicketEventStore.append(
       db,
       ticket,
       actor_user_id=current_user.id,
-      event_type=TicketEventType.PRIMARY_OFFICER_ASSIGNED,
-      payload=PrimaryOfficerAssignedPayload(
-        primary_officer_id=officer.id,
-        comment=request.comment,
-      ),
+      event_type=event_type,
+      payload=payload,
     )
     return ticket
 
@@ -374,6 +392,37 @@ class TicketWorkflowCommandService:
     return ticket, event
 
   @staticmethod
+  async def return_to_dispatch(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    request: ReturnToDispatchAction,
+    current_user: User,
+  ) -> Ticket:
+    """Return an incorrectly assigned active ticket to the central inbox."""
+
+    ticket = await require_ticket(db, ticket_id, for_update=True)
+    _require_current_assignee(ticket, current_user)
+    _require_active_processing(
+      ticket,
+      "Only actively processed tickets may be returned to dispatch.",
+    )
+    if ticket.office_id is None:
+      raise WorkflowValidationException("The ticket is already in the central inbox.")
+
+    await TicketEventStore.append(
+      db,
+      ticket,
+      actor_user_id=current_user.id,
+      event_type=TicketEventType.TICKET_RETURNED_TO_DISPATCH,
+      payload=TicketReturnedToDispatchPayload(
+        previous_office_id=ticket.office_id,
+        previous_primary_officer_id=ticket.primary_officer_id,
+        reason=request.reason,
+      ),
+    )
+    return ticket
+
+  @staticmethod
   async def complete_ticket(
     db: AsyncSession,
     ticket_id: uuid.UUID,
@@ -416,6 +465,7 @@ class TicketWorkflowCommandService:
       EscalateTicketAction: TicketWorkflowCommandService.escalate_ticket,
       DecideEscalationAction: TicketWorkflowCommandService.decide_escalation,
       RequestCitizenResponseAction: TicketWorkflowCommandService.request_citizen_response,
+      ReturnToDispatchAction: TicketWorkflowCommandService.return_to_dispatch,
       CompleteTicketAction: TicketWorkflowCommandService.complete_ticket,
     }
     for request_type, handler in handlers.items():

@@ -1,5 +1,5 @@
 # --- Web-Framework & Server ---
-fastapi>=0.109.0            # Web Framework
+fastapi>=0.121.0            # Web Framework
 uvicorn[standard]>=0.27.0   # Async ASGI Server
 python-multipart>=0.0.9     # OAuth2 Login (Form-Data)
 

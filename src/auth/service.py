@@ -1,6 +1,7 @@
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,7 +75,9 @@ class AuthService:
 
   @staticmethod
   async def refresh(db: AsyncSession, refresh_token: str) -> TokenResponse:
-    stored_token = await AuthRepository.get_refresh_token_by_hash(
+    # DELETE ... RETURNING makes the opaque refresh token single-use even when
+    # multiple clients attempt to rotate it at the same time.
+    stored_token = await AuthRepository.consume_refresh_token(
       db,
       hash_token(refresh_token),
     )
@@ -88,13 +91,27 @@ class AuthService:
     if user is None or not user.is_active:
       raise UnauthorizedException("Invalid refresh token")
 
-    await AuthRepository.delete_refresh_token_by_hash(db, stored_token.token_hash)
     return await AuthService._create_session(db, user)
 
   @staticmethod
   async def logout(db: AsyncSession, refresh_token: str) -> None:
     """Deletes the supplied refresh token. Repeated calls are intentionally harmless."""
     await AuthRepository.delete_refresh_token_by_hash(db, hash_token(refresh_token))
+
+  @staticmethod
+  async def logout_all(db: AsyncSession, user_id: UUID) -> None:
+    """Invalidate every refresh session belonging to one authenticated user."""
+
+    await AuthRepository.delete_refresh_tokens_by_user_id(db, user_id)
+
+  @staticmethod
+  async def cleanup_expired_records(db: AsyncSession) -> tuple[int, int]:
+    """Remove expired refresh tokens and password-reset challenges."""
+
+    return await AuthRepository.delete_expired_records(
+      db,
+      now=datetime.now(timezone.utc),
+    )
 
   @staticmethod
   async def request_password_reset(db: AsyncSession, email: str) -> None:

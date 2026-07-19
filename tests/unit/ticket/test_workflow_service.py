@@ -154,5 +154,84 @@ def test_allowed_actions_expose_sequential_ad_hoc_steps() -> None:
     TicketWorkflowAction.REQUEST_COSIGNATURE,
     TicketWorkflowAction.ESCALATE,
     TicketWorkflowAction.REQUEST_CITIZEN_RESPONSE,
+    TicketWorkflowAction.RETURN_TO_DISPATCH,
     TicketWorkflowAction.COMPLETE,
   ]
+
+
+@pytest.mark.asyncio
+async def test_manager_can_replace_primary_officer(monkeypatch) -> None:
+  db = AsyncMock()
+  office_id = uuid4()
+  manager = _user(Role.MANAGER, office_id=office_id)
+  previous = _user(Role.OFFICER, office_id=office_id)
+  replacement = _user(Role.OFFICER, office_id=office_id)
+  ticket = _ticket(
+    uuid4(),
+    workflow_state=TicketWorkflowState.IN_PROGRESS,
+    office_id=office_id,
+    primary_officer_id=previous.id,
+    current_assignee_id=previous.id,
+    version=3,
+  )
+  staged: list[TicketEvent] = []
+
+  monkeypatch.setattr(
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
+    AsyncMock(return_value=ticket),
+  )
+  monkeypatch.setattr(
+    "src.user.repository.UserRepository.get_by_id",
+    AsyncMock(return_value=replacement),
+  )
+  _mock_writes(monkeypatch, staged)
+
+  await TicketWorkflowCommandService.assign_primary_officer(
+    db,
+    ticket.id,
+    PrimaryOfficerAssignmentRequest(primary_officer_id=replacement.id),
+    manager,
+  )
+
+  assert ticket.primary_officer_id == replacement.id
+  assert ticket.current_assignee_id == replacement.id
+  assert staged[-1].event_type == TicketEventType.PRIMARY_OFFICER_REASSIGNED
+  assert staged[-1].payload["previous_primary_officer_id"] == str(previous.id)
+
+
+@pytest.mark.asyncio
+async def test_internal_archive_forwards_extended_filters(monkeypatch) -> None:
+  from src.ticket.domain import TicketLifecycleFilter
+  from src.ticket.repositories.ticket import TicketProjectionRepository
+
+  manager = _user(Role.MANAGER, office_id=uuid4())
+  creator_id = uuid4()
+  primary_id = uuid4()
+  assignee_id = uuid4()
+  repository_call = AsyncMock(return_value=([], 0))
+  monkeypatch.setattr(TicketProjectionRepository, "get_staff_page", repository_call)
+  monkeypatch.setattr(
+    "src.ticket.repositories.event.TicketEventRepository.get_events_for_tickets",
+    AsyncMock(return_value=[]),
+  )
+
+  response = await TicketWorkflowQueryService.list_internal_tickets(
+    AsyncMock(),
+    current_user=manager,
+    page=2,
+    size=25,
+    lifecycle=TicketLifecycleFilter.COMPLETED,
+    office_id=manager.office_id,
+    creator_user_id=creator_id,
+    primary_officer_id=primary_id,
+    current_assignee_id=assignee_id,
+  )
+
+  assert response.total == 0
+  repository_call.assert_awaited_once()
+  kwargs = repository_call.await_args.kwargs
+  assert kwargs["lifecycle"] == TicketLifecycleFilter.COMPLETED
+  assert kwargs["office_id"] == manager.office_id
+  assert kwargs["creator_user_id"] == creator_id
+  assert kwargs["primary_officer_id"] == primary_id
+  assert kwargs["current_assignee_id"] == assignee_id

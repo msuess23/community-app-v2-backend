@@ -44,3 +44,28 @@ async def test_anonymization_job_uses_configured_retention_and_commits(monkeypat
   anonymize.assert_awaited_once_with(session, retention_days=90)
   session.commit.assert_awaited_once()
   session.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auth_cleanup_job_commits_deleted_record_counts(monkeypatch):
+  session = MagicMock()
+  session.commit = AsyncMock()
+  session.rollback = AsyncMock()
+  cleanup = AsyncMock(return_value=(3, 1))
+
+  monkeypatch.setattr(
+    scheduler_module,
+    "AsyncSessionLocal",
+    lambda: SessionContext(session),
+  )
+  monkeypatch.setattr(
+    scheduler_module.AuthService,
+    "cleanup_expired_records",
+    cleanup,
+  )
+
+  await scheduler_module.auth_cleanup_cron_task()
+
+  cleanup.assert_awaited_once_with(session)
+  session.commit.assert_awaited_once()
+  session.rollback.assert_not_awaited()

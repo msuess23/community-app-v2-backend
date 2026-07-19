@@ -60,24 +60,19 @@ async def test_refresh_rotates_the_stored_token_without_committing(monkeypatch):
     expires_at=datetime.now(timezone.utc) + timedelta(days=1),
   )
 
-  delete_refresh = AsyncMock()
+  consume_refresh = AsyncMock(return_value=stored)
   add_refresh = MagicMock()
   monkeypatch.setattr(
     AuthRepository,
-    "get_refresh_token_by_hash",
-    AsyncMock(return_value=stored),
+    "consume_refresh_token",
+    consume_refresh,
   )
   monkeypatch.setattr(UserRepository, "get_by_id", AsyncMock(return_value=user))
-  monkeypatch.setattr(
-    AuthRepository,
-    "delete_refresh_token_by_hash",
-    delete_refresh,
-  )
   monkeypatch.setattr(AuthRepository, "add_refresh_token", add_refresh)
 
   response = await AuthService.refresh(db, old_plain_token)
 
-  delete_refresh.assert_awaited_once_with(db, stored.token_hash)
+  consume_refresh.assert_awaited_once_with(db, stored.token_hash)
   add_refresh.assert_called_once()
   db.flush.assert_awaited_once()
   db.commit.assert_not_awaited()
@@ -89,7 +84,7 @@ async def test_refresh_rotates_the_stored_token_without_committing(monkeypatch):
 async def test_unknown_refresh_token_is_rejected(monkeypatch):
   monkeypatch.setattr(
     AuthRepository,
-    "get_refresh_token_by_hash",
+    "consume_refresh_token",
     AsyncMock(return_value=None),
   )
 
@@ -202,3 +197,33 @@ async def test_password_reset_request_prints_development_otp(monkeypatch, capsys
   add_reset.assert_called_once()
   db.flush.assert_awaited_once()
   db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_logout_all_invalidates_every_refresh_session(monkeypatch):
+  db = make_db()
+  user = make_user()
+  delete_sessions = AsyncMock()
+  monkeypatch.setattr(
+    AuthRepository,
+    "delete_refresh_tokens_by_user_id",
+    delete_sessions,
+  )
+
+  await AuthService.logout_all(db, user.id)
+
+  delete_sessions.assert_awaited_once_with(db, user.id)
+  db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_expired_auth_cleanup_uses_repository(monkeypatch):
+  db = make_db()
+  cleanup = AsyncMock(return_value=(4, 2))
+  monkeypatch.setattr(AuthRepository, "delete_expired_records", cleanup)
+
+  counts = await AuthService.cleanup_expired_records(db)
+
+  assert counts == (4, 2)
+  cleanup.assert_awaited_once()
+  assert cleanup.await_args.kwargs["now"].tzinfo is not None

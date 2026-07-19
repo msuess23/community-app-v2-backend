@@ -100,3 +100,20 @@ async def test_commit_error_triggers_rollback(monkeypatch):
 
   session.commit.assert_awaited_once()
   session.rollback.assert_awaited_once()
+
+
+def test_http_database_dependencies_finish_before_response() -> None:
+  """Every HTTP database dependency must use FastAPI's function scope."""
+
+  from src.main import app
+
+  for route in app.routes:
+    dependant = getattr(route, "dependant", None)
+    if dependant is None:
+      continue
+    dependencies = list(dependant.dependencies)
+    while dependencies:
+      dependency = dependencies.pop()
+      if dependency.call is database.get_db:
+        assert dependency.scope == "function", route.path
+      dependencies.extend(dependency.dependencies)

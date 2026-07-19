@@ -2,6 +2,7 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from src.auth.service import AuthService
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
 from src.user.service import UserService
@@ -25,6 +26,23 @@ async def anonymization_cron_task() -> None:
       logger.exception("Deep anonymization failed")
 
 
+async def auth_cleanup_cron_task() -> None:
+  """Delete expired authentication records in an independent transaction."""
+
+  async with AsyncSessionLocal() as db:
+    try:
+      refresh_count, reset_count = await AuthService.cleanup_expired_records(db)
+      await db.commit()
+      logger.info(
+        "Expired auth cleanup removed %d refresh tokens and %d reset records",
+        refresh_count,
+        reset_count,
+      )
+    except Exception:
+      await db.rollback()
+      logger.exception("Expired auth cleanup failed")
+
+
 def setup_scheduler() -> None:
   """Starts the configured single-process demo scheduler."""
   global _scheduler
@@ -39,6 +57,13 @@ def setup_scheduler() -> None:
     hour=settings.DEEP_ANONYMIZATION_HOUR,
     minute=settings.DEEP_ANONYMIZATION_MINUTE,
     id="deep-anonymization",
+    replace_existing=True,
+  )
+  _scheduler.add_job(
+    auth_cleanup_cron_task,
+    "interval",
+    hours=1,
+    id="expired-auth-cleanup",
     replace_existing=True,
   )
   _scheduler.start()

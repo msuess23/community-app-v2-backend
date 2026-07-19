@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
@@ -21,7 +22,7 @@ optional_oauth2_scheme = OAuth2PasswordBearer(
 
 async def get_current_user(
   token: str = Depends(oauth2_scheme),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
 ) -> User:
   """Validates an access token and returns an active user."""
   payload = decode_token(token, expected_type=ACCESS_TOKEN_TYPE)
@@ -40,7 +41,7 @@ async def get_current_user(
 
 async def get_optional_current_user(
   token: str | None = Depends(optional_oauth2_scheme),
-  db: AsyncSession = Depends(get_db),
+  db: AsyncSession = Depends(get_db, scope="function"),
 ) -> User | None:
   """Returns the authenticated active user or None for anonymous requests."""
   if token is None:

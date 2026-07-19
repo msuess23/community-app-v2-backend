@@ -5,25 +5,18 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from src.core.request_models import StrictRequestModel
-from src.core.validation import normalize_optional_text, normalize_required_text
+from src.core.validation import NormalizedOptionalText, NormalizedRequiredText
 from src.media.schemas import ImageMetadataResponse
 
 
 class TicketCommentCreateRequest(StrictRequestModel):
   """Create one immutable ticket comment event."""
 
-  text: str = Field(..., min_length=1, max_length=2000)
+  text: NormalizedRequiredText = Field(..., min_length=1, max_length=2000)
   is_internal: bool = False
-
-  @field_validator("text")
-  @classmethod
-  def normalize_text(cls, value: str) -> str:
-    """Normalize comment whitespace."""
-
-    return normalize_required_text(value)
 
 
 class TicketCommentResponse(BaseModel):
@@ -47,11 +40,4 @@ class TicketImageResponse(ImageMetadataResponse):
 class TicketImageRemoveRequest(StrictRequestModel):
   """Optional explanation recorded with an image-removal event."""
 
-  reason: str | None = Field(None, max_length=500)
-
-  @field_validator("reason")
-  @classmethod
-  def normalize_reason(cls, value: str | None) -> str | None:
-    """Normalize an optional removal reason."""
-
-    return normalize_optional_text(value)
+  reason: NormalizedOptionalText = Field(None, max_length=500)

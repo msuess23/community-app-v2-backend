@@ -86,3 +86,12 @@ def get_created_date_range(
   """Validate the created_from/created_to ticket list parameters."""
 
   return _validated_range(created_from, created_to)
+
+
+def get_updated_date_range(
+  updated_from: datetime | None = Query(None),
+  updated_to: datetime | None = Query(None),
+) -> DateRangeParams:
+  """Validate the updated_from/updated_to internal-search parameters."""
+
+  return _validated_range(updated_from, updated_to)
