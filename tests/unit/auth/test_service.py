@@ -166,6 +166,11 @@ async def test_password_reset_replaces_password_and_invalidates_sessions(monkeyp
     ),
   )
 
+  AuthRepository.get_password_reset_by_email.assert_awaited_once_with(
+    db,
+    user.email,
+    for_update=True,
+  )
   assert verify_password("new-password-123", user.hashed_password)
   delete_sessions.assert_awaited_once_with(db, user.id)
   delete_reset.assert_awaited_once_with(db, reset_record.id)

@@ -21,12 +21,11 @@ from src.info.repository import InfoImageRepository, InfoRepository
 from src.info.schemas import InfoImageResponse
 from src.info.service import InfoService
 from src.media.cover import (
-  CoverChange,
-  apply_cover_change,
   new_image_should_be_cover,
   plan_cover_after_removal,
   plan_cover_selection,
 )
+from src.media.cover_persistence import apply_cover_change_safely
 from src.media.storage import (
   ImageStorageConfig,
   ImageStorageErrorCodes,
@@ -90,22 +89,6 @@ class InfoImageService:
         error_code="INFO_NOT_FOUND",
       )
     return info
-
-  @staticmethod
-  async def _apply_cover_change_safely(
-    db: AsyncSession,
-    images: list[InfoImage],
-    change: CoverChange,
-  ) -> InfoImage | None:
-    """Avoid transient violations of the one-cover partial unique index."""
-
-    if change.changed and change.previous_cover_id is not None:
-      previous = next(
-        image for image in images if image.id == change.previous_cover_id
-      )
-      previous.is_cover = False
-      await db.flush()
-    return apply_cover_change(images, change)
 
   @staticmethod
   def _existing_path(storage_key: str) -> Path | None:
@@ -218,7 +201,7 @@ class InfoImageService:
     if not change.changed:
       return InfoImageService._response(selected)
 
-    selected = await InfoImageService._apply_cover_change_safely(
+    selected = await apply_cover_change_safely(
       db,
       images,
       change,
@@ -251,7 +234,7 @@ class InfoImageService:
       ) from exc
 
     image = next(item for item in images if item.id == image_id)
-    await InfoImageService._apply_cover_change_safely(db, images, change)
+    await apply_cover_change_safely(db, images, change)
     path = InfoImageService._existing_path(image.storage_key)
     if path is not None:
       register_commit_file_delete(db, path)

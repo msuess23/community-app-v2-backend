@@ -114,4 +114,5 @@ async def get_ticket_image_content(
     path=path,
     media_type=image.mime_type,
     filename=image.original_filename,
+    content_disposition_type="inline",
   )

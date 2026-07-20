@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
+logger = logging.getLogger(__name__)
 
 _ROLLBACK_FILES_KEY = "rollback_file_paths"
 _COMMIT_DELETE_FILES_KEY = "commit_delete_file_paths"
@@ -36,7 +39,7 @@ def clear_rollback_files(db: AsyncSession) -> None:
 
 
 def cleanup_rollback_files(db: AsyncSession) -> None:
-  """Delete all files staged by a transaction that could not commit."""
+  """Delete files staged by a transaction that could not commit."""
 
   paths = db.info.pop(_ROLLBACK_FILES_KEY, set())
   for path in paths:
@@ -44,7 +47,11 @@ def cleanup_rollback_files(db: AsyncSession) -> None:
       path.unlink(missing_ok=True)
     except OSError:
       # Cleanup is best-effort and must not hide the original transaction error.
-      continue
+      logger.warning(
+        "Failed to delete transaction file during rollback cleanup: %s",
+        path,
+        exc_info=True,
+      )
 
 
 def register_commit_file_delete(db: AsyncSession, path: Path) -> None:
@@ -68,5 +75,9 @@ def cleanup_commit_file_deletes(db: AsyncSession) -> None:
     try:
       path.unlink(missing_ok=True)
     except OSError:
-      # The database commit is already durable; orphan cleanup must not falsify it.
-      continue
+      # The database commit is already durable; leave an observable orphan.
+      logger.warning(
+        "Failed to delete transaction file after database commit: %s",
+        path,
+        exc_info=True,
+      )

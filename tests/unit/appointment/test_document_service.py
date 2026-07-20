@@ -193,9 +193,10 @@ async def test_replacement_retains_old_version_and_increments_number(
     "add",
     lambda _db, document: staged.append(document),
   )
+  db = _db()
 
   response = await AppointmentDocumentService.upload_version(
-    _db(),
+    db,
     appointment_id=appointment.id,
     upload=object(),
     document_type=AppointmentDocumentType.FORM,
@@ -209,6 +210,7 @@ async def test_replacement_retains_old_version_and_increments_number(
   assert response.version_number == 2
   assert response.replaced_version_id == previous.id
   assert staged[0].is_current is True
+  assert db.flush.await_count == 2
 
 
 @pytest.mark.asyncio

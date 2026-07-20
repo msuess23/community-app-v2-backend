@@ -192,3 +192,30 @@ async def test_rollback_keeps_files_registered_for_post_commit_deletion(
     await dependency.athrow(RuntimeError("boom"))
 
   assert existing_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_post_commit_cleanup_failure_does_not_rollback_committed_request(
+  monkeypatch,
+  caplog,
+):
+  session = make_session()
+  monkeypatch.setattr(
+    database,
+    "AsyncSessionLocal",
+    lambda: SessionContext(session),
+  )
+  monkeypatch.setattr(
+    database,
+    "cleanup_commit_file_deletes",
+    lambda _session: (_ for _ in ()).throw(RuntimeError("cleanup bug")),
+  )
+
+  dependency = database.get_db()
+  assert await anext(dependency) is session
+  with pytest.raises(StopAsyncIteration):
+    await anext(dependency)
+
+  session.commit.assert_awaited_once()
+  session.rollback.assert_not_awaited()
+  assert "Unexpected post-commit file cleanup failure" in caplog.text

@@ -19,7 +19,7 @@ BASE_SETTINGS = {
 
 
 def create_settings(**overrides) -> Settings:
-  return Settings(_env_file=None, **BASE_SETTINGS, **overrides)
+  return Settings(_env_file=None, **{**BASE_SETTINGS, **overrides})
 
 
 def test_production_disallows_automatic_demo_seeding():
@@ -50,3 +50,22 @@ def test_scheduler_and_cors_settings_are_configurable():
   assert configured.DEEP_ANONYMIZATION_MINUTE == 30
   assert configured.CITIZEN_HISTORY_RETENTION_DAYS == 90
   assert configured.CORS_ORIGINS == ["http://localhost:5173"]
+
+
+def test_database_url_escapes_credentials_with_reserved_characters():
+  from sqlalchemy.engine import make_url
+
+  password = "p@ss:%/word#value"
+  configured = create_settings(
+    POSTGRES_USER="user@example.com",
+    POSTGRES_PASSWORD=password,
+    POSTGRES_DB="community/test",
+  )
+
+  parsed = make_url(configured.DATABASE_URL)
+
+  assert parsed.username == "user@example.com"
+  assert parsed.password == password
+  assert parsed.database == "community/test"
+  assert "%40" in configured.DATABASE_URL
+  assert "%2F" in configured.DATABASE_URL

@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
@@ -58,11 +59,16 @@ class Settings(BaseSettings):
   @computed_field
   @property
   def DATABASE_URL(self) -> str:
-    """Constructs the async SQLAlchemy URL from the atomic settings."""
-    return (
-      f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
-      f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-    )
+    """Construct an escaped async SQLAlchemy URL from atomic settings."""
+
+    return URL.create(
+      drivername="postgresql+asyncpg",
+      username=self.POSTGRES_USER,
+      password=self.POSTGRES_PASSWORD,
+      host=self.POSTGRES_HOST,
+      port=self.POSTGRES_PORT,
+      database=self.POSTGRES_DB,
+    ).render_as_string(hide_password=False)
 
   @model_validator(mode="after")
   def validate_startup_configuration(self) -> "Settings":

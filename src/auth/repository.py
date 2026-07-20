@@ -16,6 +16,8 @@ class AuthRepository:
   async def get_password_reset_by_email(
     db: AsyncSession,
     email: str,
+    *,
+    for_update: bool = False,
   ) -> Optional[PasswordReset]:
     query = (
       select(PasswordReset)
@@ -23,6 +25,8 @@ class AuthRepository:
       .order_by(PasswordReset.created_at.desc())
       .limit(1)
     )
+    if for_update:
+      query = query.with_for_update()
     result = await db.execute(query)
     return result.scalar_one_or_none()
 

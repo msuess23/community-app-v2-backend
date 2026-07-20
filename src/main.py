@@ -12,6 +12,7 @@ import src.models  # noqa: F401
 
 from scripts.seed.run_seed import seed_database
 from src.appointment.router import router as appointment_router
+from src.auth.dependencies import get_optional_current_user, optional_oauth2_scheme
 from src.auth.router import router as auth_router
 from src.core.config import settings
 from src.core.database import engine
@@ -23,6 +24,7 @@ from src.core.error_handlers import (
   unexpected_exception_handler,
 )
 from src.core.exceptions import DomainException
+from src.core.openapi import install_optional_auth_openapi
 from src.core.scheduler import setup_scheduler, shutdown_scheduler
 from src.info.router import router as info_router
 from src.office.router import router as office_router
@@ -105,6 +107,12 @@ app.include_router(
   ticket_router,
   prefix=f"{settings.BASE_URL}/tickets",
   tags=["Tickets"],
+)
+
+install_optional_auth_openapi(
+  app,
+  optional_user_dependency=get_optional_current_user,
+  security_scheme_name=optional_oauth2_scheme.scheme_name,
 )
 
 

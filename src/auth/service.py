@@ -142,6 +142,7 @@ class AuthService:
     reset_record = await AuthRepository.get_password_reset_by_email(
       db,
       normalized_email,
+      for_update=True,
     )
 
     if reset_record is None or reset_record.expires_at <= datetime.now(timezone.utc):

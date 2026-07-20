@@ -20,11 +20,11 @@ from src.core.transaction_files import (
   unregister_rollback_file,
 )
 from src.media.cover import (
-  apply_cover_change,
   new_image_should_be_cover,
   plan_cover_after_removal,
   plan_cover_selection,
 )
+from src.media.cover_persistence import apply_cover_change_safely
 from src.media.storage import (
   ImageStorageConfig,
   ImageStorageErrorCodes,
@@ -264,7 +264,7 @@ class TicketImageService:
       event_type=TicketEventType.TICKET_COVER_IMAGE_CHANGED,
       payload=TicketCoverImageChangedPayload(image_id=selected.id),
     )
-    selected = apply_cover_change(images, change)
+    selected = await apply_cover_change_safely(db, images, change)
     assert selected is not None
     selected.cover_selected_event_id = event.id
     await db.flush()
@@ -312,7 +312,7 @@ class TicketImageService:
     image.removed_by_user_id = current_user.id
     image.removed_event_id = removed_event.id
 
-    selected = apply_cover_change(images, cover_change)
+    selected = await apply_cover_change_safely(db, images, cover_change)
     if cover_change.changed and selected is not None:
       # The replacement is a separate event because the cover affects public output.
       cover_event = await TicketEventStore.append(

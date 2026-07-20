@@ -199,8 +199,10 @@ class AppointmentDocumentService:
         ),
       )
       if replaced is not None:
-        # The old row remains immutable apart from losing its current marker.
+        # Release the partial one-current-version unique index before inserting
+        # the replacement. This must not depend on ORM statement ordering.
         replaced.is_current = False
+        await db.flush()
 
       document = AppointmentDocument(
         id=document_id,

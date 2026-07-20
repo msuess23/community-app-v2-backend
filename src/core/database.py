@@ -1,3 +1,4 @@
+import logging
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -10,6 +11,9 @@ from src.core.transaction_files import (
   cleanup_commit_file_deletes,
   cleanup_rollback_files,
 )
+
+
+logger = logging.getLogger(__name__)
 
 # Create async engine for PostgreSQL
 engine = create_async_engine(
@@ -41,10 +45,16 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     try:
       yield session
       await session.commit()
-      cleanup_commit_file_deletes(session)
-      clear_rollback_files(session)
     except Exception:
       await session.rollback()
       clear_commit_file_deletes(session)
       cleanup_rollback_files(session)
       raise
+    else:
+      clear_rollback_files(session)
+      try:
+        cleanup_commit_file_deletes(session)
+      except Exception:
+        # The commit is already durable. Cleanup failures must remain observable
+        # without turning a successful request into a false transaction error.
+        logger.exception("Unexpected post-commit file cleanup failure")

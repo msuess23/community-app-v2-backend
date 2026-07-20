@@ -144,6 +144,7 @@ async def test_info_images_cover_content_and_physical_deletion(
         content = await client.get(second.json()["url"])
         assert content.status_code == 200
         assert content.headers["content-type"].startswith("image/png")
+        assert content.headers["content-disposition"].startswith("inline;")
 
         deleted_cover = await client.delete(
           f"/api/v1/infos/{info_id}/images/{second.json()['id']}",
