@@ -67,6 +67,8 @@ async def get_office(
   db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User | None = Depends(get_optional_current_user),
 ):
+  """Return one office visible to the current caller."""
+
   include_inactive = current_user is not None and current_user.role == Role.ADMIN
   return await OfficeService.get_office_by_id(
     db,
@@ -81,6 +83,8 @@ async def create_office(
   db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
+  """Create an office as an authenticated administrator."""
+
   return await OfficeService.create_office(db, office_data, current_user.id)
 
 
@@ -91,6 +95,8 @@ async def update_office(
   db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
+  """Update an office and record its previous state."""
+
   target_office = await OfficeService.get_office_by_id(
     db,
     office_id,
@@ -111,6 +117,8 @@ async def deactivate_office(
   db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
+  """Deactivate an office after lifecycle guard validation."""
+
   await OfficeService.deactivate_office(
     db,
     office_id,
@@ -130,6 +138,8 @@ async def get_office_history(
   db: AsyncSession = Depends(get_db, scope="function"),
   _current_user: User = Depends(role_required(Role.ADMIN)),
 ):
+  """Return the paginated audit history of an office."""
+
   return await OfficeService.get_office_history(
     db,
     office_id,

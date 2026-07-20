@@ -39,6 +39,8 @@ class InfoImageService:
     *,
     for_update: bool = False,
   ) -> Info:
+    """Load an Info row with images or raise the canonical not-found error."""
+
     info = await InfoRepository.get_by_id(db, info_id, for_update=for_update)
     if info is None:
       raise ResourceNotFoundException(
@@ -52,6 +54,8 @@ class InfoImageService:
     db: AsyncSession,
     info_id: uuid.UUID,
   ) -> list[InfoImageResponse]:
+    """List current images attached to a public Info notice."""
+
     await InfoImageService._require_info(db, info_id)
     images = await InfoImageRepository.get_images(db, info_id)
     return [InfoResponseMapper.image_response(image) for image in images]
@@ -63,6 +67,8 @@ class InfoImageService:
     upload: UploadFile,
     current_user: User,
   ) -> InfoImageResponse:
+    """Validate and persist a new image for a manageable Info notice."""
+
     info = await InfoImageService._require_info(db, info_id, for_update=True)
     InfoAccessPolicy.require_manage_permission(info, current_user)
 
@@ -116,6 +122,8 @@ class InfoImageService:
     image_id: uuid.UUID,
     current_user: User,
   ) -> InfoImageResponse:
+    """Select one current Info image as the public cover."""
+
     info = await InfoImageService._require_info(db, info_id, for_update=True)
     InfoAccessPolicy.require_manage_permission(info, current_user)
     images = await InfoImageRepository.get_images(
@@ -152,6 +160,8 @@ class InfoImageService:
     image_id: uuid.UUID,
     current_user: User,
   ) -> None:
+    """Physically delete an Info image and select a replacement cover."""
+
     info = await InfoImageService._require_info(db, info_id, for_update=True)
     InfoAccessPolicy.require_manage_permission(info, current_user)
     images = await InfoImageRepository.get_images(
@@ -180,6 +190,8 @@ class InfoImageService:
     info_id: uuid.UUID,
     image_id: uuid.UUID,
   ) -> tuple[Path, InfoImage]:
+    """Resolve a public Info image and its stored file path."""
+
     if await InfoRepository.get_by_id(db, info_id) is None:
       raise ResourceNotFoundException(
         "Info image not found",

@@ -55,6 +55,8 @@ def _validated_range(
   start: datetime | None,
   end: datetime | None,
 ) -> DateRangeParams:
+  """Validate an optional inclusive date range and return its boundaries."""
+
   for value in (start, end):
     if value is not None and (value.tzinfo is None or value.utcoffset() is None):
       raise DomainValidationException(

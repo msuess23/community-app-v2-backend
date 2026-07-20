@@ -12,10 +12,14 @@ class InfoResponseMapper:
 
   @staticmethod
   def status_response(entry: InfoStatusEntry) -> InfoStatusResponse:
+    """Map one Info status row to its public response."""
+
     return InfoStatusResponse.model_validate(entry)
 
   @staticmethod
   def image_response(image: InfoImage) -> InfoImageResponse:
+    """Map one Info image row to public metadata and a content URL."""
+
     return InfoImageResponse(
       id=image.id,
       info_id=image.info_id,
@@ -34,6 +38,8 @@ class InfoResponseMapper:
     info: Info,
     current_status: InfoStatusEntry,
   ) -> InfoResponse:
+    """Map an Info row and its latest status to the public response."""
+
     cover = next(
       (image for image in getattr(info, "images", ()) if image.is_cover),
       None,

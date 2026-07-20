@@ -37,6 +37,8 @@ router = APIRouter()
 async def get_my_profile(
   current_user: User = Depends(get_current_user),
 ):
+  """Return the authenticated user profile."""
+
   return current_user
 
 
@@ -46,6 +48,8 @@ async def update_my_profile(
   current_user: User = Depends(get_current_user),
   db: AsyncSession = Depends(get_db, scope="function"),
 ):
+  """Update fields owned by the authenticated user."""
+
   return await UserService.update_user_profile(
     db,
     current_user,
@@ -86,6 +90,8 @@ async def get_all_users(
 async def get_user(
   target_user: User = Depends(get_target_user_if_allowed),
 ):
+  """Return a user already authorized by the target-user dependency."""
+
   return target_user
 
 
@@ -96,6 +102,8 @@ async def update_user_by_admin(
   db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
+  """Apply an administrative user update and record history."""
+
   target_user = await UserService.get_user_by_id(db, user_id)
   return await UserService.update_user_profile(
     db,
@@ -112,6 +120,8 @@ async def deactivate_user(
   db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
+  """Deactivate a user after lifecycle guard validation."""
+
   await UserService.deactivate_user(
     db,
     user_id,
@@ -131,6 +141,8 @@ async def get_user_history(
   db: AsyncSession = Depends(get_db, scope="function"),
   _current_user: User = Depends(role_required(Role.ADMIN)),
 ):
+  """Return the paginated audit history of a user."""
+
   return await UserService.get_user_history(
     db,
     user_id,

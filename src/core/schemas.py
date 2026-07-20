@@ -24,6 +24,8 @@ class BaseMetadataResponse(BaseModel):
   @model_validator(mode="before")
   @classmethod
   def map_metadata(cls, data: Any) -> Any:
+    """Map ORM metadata fields into a shared response schema."""
+
     if isinstance(data, dict):
       if "metadata" not in data:
         data["metadata"] = {
@@ -64,5 +66,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
     page: int,
     size: int,
   ) -> "PaginatedResponse[T]":
+    """Build pagination metadata and the corresponding result page."""
+
     pages = ceil(total / size) if total else 0
     return cls(data=data, total=total, page=page, size=size, pages=pages)

@@ -183,6 +183,8 @@ class AppointmentRepository:
 
   @staticmethod
   def _detail_query():
+    """Build the eager-loading query shared by appointment detail reads."""
+
     return select(Appointment).options(
       selectinload(Appointment.office),
       selectinload(Appointment.current_slot),

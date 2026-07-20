@@ -10,6 +10,8 @@ from src.core.database import Base
 
 
 class OfficeSortField(str, enum.Enum):
+  """Define supported sort fields for office list queries."""
+
   CREATED_AT = "created_at"
   NAME = "name"
   CONTACT_EMAIL = "contact_email"

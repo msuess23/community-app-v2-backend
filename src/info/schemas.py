@@ -19,6 +19,8 @@ from src.media.schemas import ImageMetadataResponse
 
 
 def _require_timezone(value: datetime) -> datetime:
+  """Require a timezone-aware datetime value."""
+
   if value.tzinfo is None or value.utcoffset() is None:
     raise ValueError("datetime must include a timezone")
   return value
@@ -38,10 +40,14 @@ class InfoCreateRequest(StrictRequestModel):
   @field_validator("starts_at", "ends_at")
   @classmethod
   def validate_timezone(cls, value: datetime) -> datetime:
+    """Require timezone-aware Info boundaries."""
+
     return _require_timezone(value)
 
   @model_validator(mode="after")
   def validate_interval(self) -> "InfoCreateRequest":
+    """Require the Info end to occur after its start."""
+
     if self.ends_at <= self.starts_at:
       raise ValueError("ends_at must be after starts_at")
     return self
@@ -65,6 +71,8 @@ class InfoUpdateRequest(StrictRequestModel):
   @field_validator("category", mode="before")
   @classmethod
   def reject_null_category(cls, value: object) -> object:
+    """Reject explicit null for the non-nullable category field."""
+
     if value is None:
       raise ValueError("category cannot be null")
     return value
@@ -72,6 +80,8 @@ class InfoUpdateRequest(StrictRequestModel):
   @field_validator("starts_at", "ends_at", mode="before")
   @classmethod
   def reject_null_datetimes(cls, value: object) -> object:
+    """Reject explicit null for non-nullable time boundaries."""
+
     if value is None:
       raise ValueError("starts_at and ends_at cannot be null")
     return value
@@ -79,6 +89,8 @@ class InfoUpdateRequest(StrictRequestModel):
   @field_validator("starts_at", "ends_at")
   @classmethod
   def validate_timezone(cls, value: datetime | None) -> datetime | None:
+    """Require timezone-aware updated time boundaries."""
+
     return _require_timezone(value) if value is not None else None
 
 

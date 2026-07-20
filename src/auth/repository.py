@@ -19,6 +19,8 @@ class AuthRepository:
     *,
     for_update: bool = False,
   ) -> Optional[PasswordReset]:
+    """Load the latest password-reset record for an email address."""
+
     query = (
       select(PasswordReset)
       .where(PasswordReset.email == email)
@@ -35,6 +37,8 @@ class AuthRepository:
     db: AsyncSession,
     email: str,
   ) -> None:
+    """Delete all password-reset records for an email address."""
+
     await db.execute(delete(PasswordReset).where(PasswordReset.email == email))
 
   @staticmethod
@@ -42,10 +46,14 @@ class AuthRepository:
     db: AsyncSession,
     reset_id: uuid.UUID,
   ) -> None:
+    """Delete one password-reset record by identifier."""
+
     await db.execute(delete(PasswordReset).where(PasswordReset.id == reset_id))
 
   @staticmethod
   def add_password_reset(db: AsyncSession, reset_record: PasswordReset) -> None:
+    """Stage a password-reset record in the current transaction."""
+
     db.add(reset_record)
 
   @staticmethod
@@ -64,6 +72,8 @@ class AuthRepository:
 
   @staticmethod
   def add_refresh_token(db: AsyncSession, token: RefreshToken) -> None:
+    """Stage a hashed refresh-token record in the current transaction."""
+
     db.add(token)
 
   @staticmethod
@@ -71,6 +81,8 @@ class AuthRepository:
     db: AsyncSession,
     token_hash: str,
   ) -> None:
+    """Delete one refresh-token record by its hash."""
+
     await db.execute(
       delete(RefreshToken).where(RefreshToken.token_hash == token_hash)
     )
@@ -80,6 +92,8 @@ class AuthRepository:
     db: AsyncSession,
     user_id: uuid.UUID,
   ) -> None:
+    """Delete every refresh token owned by one user."""
+
     await db.execute(
       delete(RefreshToken).where(RefreshToken.user_id == user_id)
     )

@@ -20,6 +20,8 @@ _OPENING_INTERVAL = re.compile(r"^(\d{2}):(\d{2})-(\d{2}):(\d{2})$")
 
 
 def _normalize_opening_hours(value: str | None) -> str | None:
+  """Normalize and validate one opening-hours value."""
+
   if value is None:
     return None
 
@@ -54,6 +56,8 @@ def _normalize_opening_hours(value: str | None) -> str | None:
 
 
 class OpeningHours(StrictRequestModel):
+  """Validate normalized opening-hour values for every weekday."""
+
   monday: str | None = None
   tuesday: str | None = None
   wednesday: str | None = None
@@ -65,10 +69,14 @@ class OpeningHours(StrictRequestModel):
   @field_validator("*")
   @classmethod
   def validate_day(cls, value: str | None) -> str | None:
+    """Validate one weekday opening-hours expression."""
+
     return _normalize_opening_hours(value)
 
 
 class OfficeBase(StrictRequestModel):
+  """Define fields shared by office creation and response schemas."""
+
   name: NormalizedRequiredText = Field(..., min_length=3, max_length=150)
   description: NormalizedOptionalText = Field(None, max_length=1000)
   contact_email: EmailStr | None = None
@@ -83,6 +91,8 @@ class OfficeBase(StrictRequestModel):
   @field_validator("services")
   @classmethod
   def normalize_services(cls, values: list[str]) -> list[str]:
+    """Normalize and deduplicate the configured office services."""
+
     result: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -97,10 +107,14 @@ class OfficeBase(StrictRequestModel):
 
 
 class OfficeCreate(OfficeBase):
+  """Validate the payload used to create an office."""
+
   address: AddressCreate | None = None
 
 
 class OfficeUpdate(StrictRequestModel):
+  """Validate a partial office update payload."""
+
   name: NonNullableNormalizedUpdateText = Field(
     None,
     min_length=3,
@@ -121,6 +135,8 @@ class OfficeUpdate(StrictRequestModel):
   @field_validator("services", mode="before")
   @classmethod
   def reject_null_services(cls, value: object) -> object:
+    """Reject explicit null for the non-nullable service collection."""
+
     if value is None:
       raise ValueError("services cannot be null")
     return value
@@ -128,14 +144,20 @@ class OfficeUpdate(StrictRequestModel):
   @field_validator("services")
   @classmethod
   def normalize_services(cls, values: list[str] | None) -> list[str] | None:
+    """Normalize and deduplicate updated office services."""
+
     return OfficeBase.normalize_services(values) if values is not None else None
 
 
 class OfficeDeactivateRequest(StrictRequestModel):
+  """Validate the audit reason for office deactivation."""
+
   change_reason: ChangeReason
 
 
 class OfficeResponse(BaseMetadataResponse):
+  """Serialize an office and its optional owned address."""
+
   id: UUID
   name: str
   description: str | None = None
@@ -149,6 +171,8 @@ class OfficeResponse(BaseMetadataResponse):
 
 
 class OfficeHistoryResponse(BaseModel):
+  """Serialize one immutable office history snapshot."""
+
   id: UUID
   office_id: UUID
   name: str

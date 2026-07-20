@@ -36,10 +36,14 @@ class AppointmentSlotCreate(StrictRequestModel):
   @field_validator("starts_at", "ends_at")
   @classmethod
   def validate_timezone(cls, value: datetime) -> datetime:
+    """Require timezone-aware slot boundaries."""
+
     return _require_timezone(value)
 
   @model_validator(mode="after")
   def validate_interval(self) -> "AppointmentSlotCreate":
+    """Require the slot end to occur after its start."""
+
     if self.ends_at <= self.starts_at:
       raise ValueError("ends_at must be after starts_at")
     return self

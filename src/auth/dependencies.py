@@ -54,6 +54,8 @@ def role_required(*allowed_roles: Role):
   allowed = set(allowed_roles)
 
   async def guard(current_user: User = Depends(get_current_user)) -> User:
+    """Reject authenticated users whose role is outside the allowed set."""
+
     if current_user.role not in allowed:
       raise ForbiddenException()
     return current_user

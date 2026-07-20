@@ -33,6 +33,8 @@ class OfficeService:
     changed_by_user_id: uuid.UUID,
     change_reason: str,
   ) -> OfficeHistory:
+    """Capture the current office state as an immutable history row."""
+
     snapshot = OfficeHistory(
       office_id=office.id,
       name=office.name,
@@ -66,6 +68,8 @@ class OfficeService:
     sort_by: OfficeSortField = OfficeSortField.NAME,
     order: SortOrder = SortOrder.ASC,
   ) -> PaginatedResponse:
+    """Return offices visible to the caller with search and pagination."""
+
     if (
       (current_user is None or current_user.role != Role.ADMIN)
       and status != LifecycleStatusFilter.ACTIVE
@@ -99,6 +103,8 @@ class OfficeService:
     *,
     include_inactive: bool = False,
   ) -> Office:
+    """Load one office according to lifecycle visibility rules."""
+
     office = await OfficeRepository.get_by_id(db, office_id)
     if office is None or (not include_inactive and not office.is_active):
       raise ResourceNotFoundException(
@@ -113,6 +119,8 @@ class OfficeService:
     office_data: OfficeCreate,
     admin_id: uuid.UUID,
   ) -> Office:
+    """Create an office, optional address, and initial history snapshot."""
+
     address_entity = None
     if office_data.address:
       address_entity = AddressService.create_address_entity(office_data.address)
@@ -148,6 +156,8 @@ class OfficeService:
     update_data: OfficeUpdate,
     admin_id: uuid.UUID,
   ) -> Office:
+    """Update an office and preserve its previous state in history."""
+
     if not office.is_active:
       raise DomainValidationException(
         "Cannot update a deactivated office.",
@@ -218,6 +228,8 @@ class OfficeService:
     admin_id: uuid.UUID,
     change_reason: str,
   ) -> None:
+    """Deactivate an office after enforcing dependent-resource guards."""
+
     office = await OfficeService.get_office_by_id(
       db,
       office_id,

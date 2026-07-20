@@ -17,10 +17,14 @@ class AddressService:
 
   @staticmethod
   def create_address_entity(address_data: AddressCreate) -> Address:
+    """Build a new address entity from a validated creation payload."""
+
     return Address(**address_data.model_dump())
 
   @staticmethod
   def create_address_from_update(address_data: AddressUpdate) -> Address:
+    """Build a complete address entity from an update payload."""
+
     values = address_data.model_dump(exclude_unset=True)
     missing = AddressService.REQUIRED_FIELDS - values.keys()
     if missing:
@@ -33,12 +37,16 @@ class AddressService:
 
   @staticmethod
   def update_address_entity(address: Address, update_data: AddressUpdate) -> Address:
+    """Apply validated address fields to an existing entity."""
+
     for key, value in update_data.model_dump(exclude_unset=True).items():
       setattr(address, key, value)
     return address
 
   @staticmethod
   async def get_address_by_id(db: AsyncSession, address_id: uuid.UUID) -> Address:
+    """Load an address or raise the canonical not-found error."""
+
     address = await AddressRepository.get_by_id(db, address_id)
     if not address:
       raise ResourceNotFoundException(

@@ -29,6 +29,8 @@ class UserRepository:
 
   @staticmethod
   async def get_by_email(db: AsyncSession, email: str) -> User | None:
+    """Load one user account by normalized email address."""
+
     normalized_email = email.strip().lower()
     result = await db.execute(
       select(User).where(func.lower(User.email) == normalized_email)
@@ -37,6 +39,8 @@ class UserRepository:
 
   @staticmethod
   async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+    """Load one user account by identifier."""
+
     result = await db.execute(select(User).where(User.id == user_id))
     return result.scalar_one_or_none()
 
@@ -55,6 +59,8 @@ class UserRepository:
     sort_by: UserSortField = UserSortField.LAST_NAME,
     order: SortOrder = SortOrder.ASC,
   ) -> tuple[list[User], int]:
+    """Return a role-scoped, filtered, and paginated user list."""
+
     query = select(User)
     query = apply_lifecycle_filter(query, User, status)
     query = apply_search_filter(
@@ -89,6 +95,8 @@ class UserRepository:
     db: AsyncSession,
     office_id: uuid.UUID,
   ) -> bool:
+    """Return whether an office still owns active authority users."""
+
     result = await db.execute(
       select(User.id)
       .where(
@@ -101,10 +109,14 @@ class UserRepository:
 
   @staticmethod
   def add(db: AsyncSession, user: User) -> None:
+    """Stage a new user account in the current transaction."""
+
     db.add(user)
 
   @staticmethod
   def add_history(db: AsyncSession, history_entry: UserHistory) -> None:
+    """Stage an immutable user history snapshot."""
+
     db.add(history_entry)
 
   @staticmethod
@@ -148,6 +160,8 @@ class UserRepository:
     start_date: datetime | None = None,
     end_date: datetime | None = None,
   ) -> tuple[list[UserHistory], int]:
+    """Return a paginated user history timeline."""
+
     query = select(UserHistory).where(UserHistory.user_id == user_id)
 
     if start_date:

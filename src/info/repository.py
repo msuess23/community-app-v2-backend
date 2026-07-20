@@ -35,6 +35,8 @@ class InfoRepository:
 
   @staticmethod
   def _detail_query():
+    """Build the eager-loading query shared by Info detail reads."""
+
     return select(Info).options(
       selectinload(Info.address),
       selectinload(Info.images),
@@ -47,6 +49,8 @@ class InfoRepository:
     *,
     for_update: bool = False,
   ) -> Info | None:
+    """Load one Info row and its owned relationships."""
+
     query = InfoRepository._detail_query().where(Info.id == info_id)
     if for_update:
       query = query.with_for_update()
@@ -68,6 +72,8 @@ class InfoRepository:
     sort_by: InfoSortField,
     order: SortOrder,
   ) -> tuple[list[Info], int]:
+    """Return a filtered, sorted, and paginated page of Info rows."""
+
     query = InfoRepository._detail_query()
     query = apply_search_filter(query, search, Info.title, Info.description)
 
@@ -97,10 +103,14 @@ class InfoRepository:
 
   @staticmethod
   def add(db: AsyncSession, info: Info) -> None:
+    """Stage a new Info row in the current transaction."""
+
     db.add(info)
 
   @staticmethod
   async def delete(db: AsyncSession, info: Info) -> None:
+    """Physically delete an Info row in the current transaction."""
+
     await db.delete(info)
 
 
@@ -109,6 +119,8 @@ class InfoImageRepository:
 
   @staticmethod
   def add(db: AsyncSession, image: InfoImage) -> None:
+    """Stage a new Info image row in the current transaction."""
+
     db.add(image)
 
   @staticmethod
@@ -119,6 +131,8 @@ class InfoImageRepository:
     *,
     for_update: bool = False,
   ) -> InfoImage | None:
+    """Load one image belonging to a specific Info notice."""
+
     query = select(InfoImage).where(
       InfoImage.info_id == info_id,
       InfoImage.id == image_id,
@@ -134,6 +148,8 @@ class InfoImageRepository:
     *,
     for_update: bool = False,
   ) -> list[InfoImage]:
+    """Load all current images belonging to an Info notice."""
+
     query = (
       select(InfoImage)
       .where(InfoImage.info_id == info_id)
@@ -145,6 +161,8 @@ class InfoImageRepository:
 
   @staticmethod
   async def delete(db: AsyncSession, image: InfoImage) -> None:
+    """Physically delete an Info image row."""
+
     await db.delete(image)
 
 
@@ -153,6 +171,8 @@ class InfoStatusRepository:
 
   @staticmethod
   def add(db: AsyncSession, entry: InfoStatusEntry) -> None:
+    """Stage a new Info status history row."""
+
     db.add(entry)
 
   @staticmethod
@@ -160,6 +180,8 @@ class InfoStatusRepository:
     db: AsyncSession,
     info_id: uuid.UUID,
   ) -> list[InfoStatusEntry]:
+    """Load the complete chronological status history of an Info notice."""
+
     result = await db.execute(
       select(InfoStatusEntry)
       .where(InfoStatusEntry.info_id == info_id)
@@ -172,6 +194,8 @@ class InfoStatusRepository:
     db: AsyncSession,
     info_id: uuid.UUID,
   ) -> InfoStatusEntry | None:
+    """Load the latest status row for an Info notice."""
+
     result = await db.execute(
       select(InfoStatusEntry)
       .where(InfoStatusEntry.info_id == info_id)
@@ -185,6 +209,8 @@ class InfoStatusRepository:
     db: AsyncSession,
     info_ids: list[uuid.UUID],
   ) -> dict[uuid.UUID, InfoStatusEntry]:
+    """Load the latest status row for each requested Info identifier."""
+
     if not info_ids:
       return {}
 

@@ -33,6 +33,8 @@ class AuthService:
 
   @staticmethod
   async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
+    """Create a citizen account after enforcing registration rules."""
+
     email = normalize_email(str(user_data.email))
     existing_user = await UserRepository.get_by_email(db, email)
     if existing_user:
@@ -63,6 +65,8 @@ class AuthService:
 
   @staticmethod
   async def login(db: AsyncSession, email: str, password: str) -> TokenResponse:
+    """Authenticate credentials and issue a new token session."""
+
     user = await UserRepository.get_by_email(db, normalize_email(email))
     if (
       user is None
@@ -75,6 +79,8 @@ class AuthService:
 
   @staticmethod
   async def refresh(db: AsyncSession, refresh_token: str) -> TokenResponse:
+    """Rotate a valid refresh token and return a replacement session."""
+
     # DELETE ... RETURNING makes the opaque refresh token single-use even when
     # multiple clients attempt to rotate it at the same time.
     stored_token = await AuthRepository.consume_refresh_token(
@@ -138,6 +144,8 @@ class AuthService:
 
   @staticmethod
   async def reset_password(db: AsyncSession, data: ResetPasswordRequest) -> None:
+    """Consume a valid OTP and replace the account password atomically."""
+
     normalized_email = normalize_email(str(data.email))
     reset_record = await AuthRepository.get_password_reset_by_email(
       db,
@@ -172,6 +180,8 @@ class AuthService:
 
   @staticmethod
   async def _create_session(db: AsyncSession, user: User) -> TokenResponse:
+    """Issue and persist one access-token and refresh-token pair."""
+
     refresh_token = generate_refresh_token()
     AuthRepository.add_refresh_token(
       db,

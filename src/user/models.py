@@ -8,6 +8,8 @@ from sqlalchemy.orm import relationship
 from src.core.database import Base
 
 class Role(str, enum.Enum):
+  """Define the supported citizen and authority user roles."""
+
   CITIZEN = "CITIZEN"
   DISPATCHER = "DISPATCHER"
   OFFICER = "OFFICER"
@@ -15,6 +17,8 @@ class Role(str, enum.Enum):
   ADMIN = "ADMIN"
 
 class UserSortField(str, enum.Enum):
+  """Define supported sort fields for user list queries."""
+
   CREATED_AT = "created_at"
   EMAIL = "email"
   FIRST_NAME = "first_name"
@@ -23,6 +27,8 @@ class UserSortField(str, enum.Enum):
 
 
 class User(Base):
+  """Persist the current user account and role assignment."""
+
   __tablename__ = "users"
 
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -44,6 +50,8 @@ class User(Base):
   )
 
 class UserHistory(Base):
+  """Persist one immutable snapshot of a user account change."""
+
   __tablename__ = "user_history"
 
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

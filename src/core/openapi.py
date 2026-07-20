@@ -11,6 +11,8 @@ from fastapi.routing import APIRoute
 
 
 def _depends_on(dependant: Any, dependency: Callable[..., Any]) -> bool:
+  """Return whether a FastAPI dependency tree contains a target callable."""
+
   if dependant.call is dependency:
     return True
   return any(
@@ -28,6 +30,8 @@ def install_optional_auth_openapi(
   """Document endpoints that accept either anonymous or bearer-auth access."""
 
   def custom_openapi() -> dict[str, Any]:
+    """Generate and cache OpenAPI with optional bearer-auth alternatives."""
+
     if app.openapi_schema is not None:
       return app.openapi_schema
 

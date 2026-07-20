@@ -49,6 +49,8 @@ class AddressUpdate(StrictRequestModel):
 
 
 class AddressResponse(BaseModel):
+  """Serialize a persisted address for API responses."""
+
   id: UUID
   street: str
   house_number: str

@@ -118,6 +118,8 @@ install_optional_auth_openapi(
 
 @app.get("/")
 async def root():
+  """Return a minimal service availability response."""
+
   return {
     "message": f"Welcome to the {settings.PROJECT_NAME} API",
     "status": "online",

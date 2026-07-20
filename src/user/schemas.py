@@ -17,6 +17,8 @@ from src.user.models import Role
 
 class UserCreate(StrictRequestModel):
 
+  """Validate account registration and administrative user creation."""
+
   email: EmailStr
   password: str = Field(..., min_length=8, max_length=128)
   first_name: NormalizedRequiredText = Field(..., min_length=2, max_length=100)
@@ -25,15 +27,21 @@ class UserCreate(StrictRequestModel):
   @field_validator("email")
   @classmethod
   def normalize_email_value(cls, value: EmailStr) -> str:
+    """Normalize the account email before uniqueness validation."""
+
     return normalize_email(str(value))
 
   @field_validator("password")
   @classmethod
   def validate_password_bytes(cls, value: str) -> str:
+    """Reject passwords that exceed the bcrypt byte limit."""
+
     return ensure_bcrypt_compatible(value)
 
 
 class UserResponse(BaseMetadataResponse):
+  """Serialize the current public user account state."""
+
   id: UUID
   email: EmailStr
   first_name: str
@@ -45,6 +53,8 @@ class UserResponse(BaseMetadataResponse):
 
 
 class UserUpdate(StrictRequestModel):
+  """Validate fields a user may change on their own profile."""
+
   first_name: NonNullableNormalizedUpdateText = Field(
     None,
     min_length=2,
@@ -58,6 +68,8 @@ class UserUpdate(StrictRequestModel):
 
 
 class AdminUserUpdate(UserUpdate):
+  """Validate administrative role, office, and profile changes."""
+
   role: Optional[Role] = None
   office_id: Optional[UUID] = None
   change_reason: ChangeReason
@@ -65,16 +77,22 @@ class AdminUserUpdate(UserUpdate):
   @field_validator("role", mode="before")
   @classmethod
   def reject_null_role(cls, value: object) -> object:
+    """Reject explicit null for the non-nullable role field."""
+
     if value is None:
       raise ValueError("role cannot be null")
     return value
 
 
 class UserDeactivateRequest(StrictRequestModel):
+  """Validate the audit reason for user deactivation."""
+
   change_reason: ChangeReason
 
 
 class UserHistoryResponse(BaseModel):
+  """Serialize one immutable user history snapshot."""
+
   id: UUID
   user_id: UUID
   email: str

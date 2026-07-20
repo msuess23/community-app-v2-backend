@@ -1,3 +1,5 @@
+"""Seed demo offices, owned addresses, and initial history snapshots."""
+
 import logging
 import uuid
 

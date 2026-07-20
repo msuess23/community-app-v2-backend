@@ -44,6 +44,8 @@ class InfoService:
     starts_at: datetime,
     ends_at: datetime,
   ) -> None:
+    """Require a valid start and end time for an Info notice."""
+
     if ends_at <= starts_at:
       raise DomainValidationException(
         "ends_at must be after starts_at.",
@@ -55,6 +57,8 @@ class InfoService:
     starts_from: datetime | None,
     ends_to: datetime | None,
   ) -> None:
+    """Require a valid optional time range for Info filtering."""
+
     for value in (starts_from, ends_to):
       if value is not None and (value.tzinfo is None or value.utcoffset() is None):
         raise DomainValidationException(
@@ -72,6 +76,8 @@ class InfoService:
     db: AsyncSession,
     office_id: uuid.UUID,
   ) -> Office:
+    """Load an active office or raise the canonical validation error."""
+
     office = await OfficeRepository.get_by_id(db, office_id)
     if office is None:
       raise DomainValidationException(
@@ -93,6 +99,8 @@ class InfoService:
     office_id: uuid.UUID | None,
     current_user: User,
   ) -> None:
+    """Validate the office assignment allowed for a new Info notice."""
+
     InfoAccessPolicy.require_create_permission(office_id, current_user)
     if office_id is not None:
       await InfoService._require_active_office(db, office_id)
@@ -113,6 +121,8 @@ class InfoService:
     sort_by: InfoSortField,
     order: SortOrder,
   ) -> PaginatedResponse[InfoResponse]:
+    """Return a public filtered and paginated Info list."""
+
     InfoService._validate_filter_window(starts_from, ends_to)
     infos, total = await InfoRepository.get_page(
       db,
@@ -149,6 +159,8 @@ class InfoService:
     db: AsyncSession,
     info_id: uuid.UUID,
   ) -> InfoResponse:
+    """Return one public Info notice and its latest status."""
+
     info = await InfoRepository.get_by_id(db, info_id)
     if info is None:
       raise ResourceNotFoundException(
@@ -169,6 +181,8 @@ class InfoService:
     request: InfoCreateRequest,
     current_user: User,
   ) -> InfoResponse:
+    """Create a mutable Info notice with its initial status row."""
+
     await InfoService._validate_create_office(
       db,
       request.office_id,
@@ -217,6 +231,8 @@ class InfoService:
     request: InfoUpdateRequest,
     current_user: User,
   ) -> InfoResponse:
+    """Apply an in-place Info update without creating a revision."""
+
     info = await InfoRepository.get_by_id(db, info_id, for_update=True)
     if info is None:
       raise ResourceNotFoundException(
@@ -266,6 +282,8 @@ class InfoService:
     info_id: uuid.UUID,
     current_user: User,
   ) -> None:
+    """Physically delete an Info notice and its owned resources."""
+
     info = await InfoRepository.get_by_id(db, info_id, for_update=True)
     if info is None:
       raise ResourceNotFoundException(
@@ -282,6 +300,8 @@ class InfoService:
     db: AsyncSession,
     info_id: uuid.UUID,
   ) -> list[InfoStatusResponse]:
+    """Return the chronological public status history of an Info notice."""
+
     if await InfoRepository.get_by_id(db, info_id) is None:
       raise ResourceNotFoundException(
         "Info not found",
@@ -295,6 +315,8 @@ class InfoService:
     db: AsyncSession,
     info_id: uuid.UUID,
   ) -> InfoStatusResponse | None:
+    """Return the latest public status of an Info notice."""
+
     if await InfoRepository.get_by_id(db, info_id) is None:
       raise ResourceNotFoundException(
         "Info not found",
@@ -310,6 +332,8 @@ class InfoService:
     request: InfoStatusCreateRequest,
     current_user: User,
   ) -> InfoStatusResponse:
+    """Append a status row and update the current Info status atomically."""
+
     info = await InfoRepository.get_by_id(db, info_id, for_update=True)
     if info is None:
       raise ResourceNotFoundException(

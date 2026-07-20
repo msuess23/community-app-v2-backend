@@ -9,12 +9,16 @@ from src.core.exceptions import DomainValidationException
 
 
 class LifecycleStatusFilter(str, Enum):
+  """Define reusable active, inactive, and combined lifecycle filters."""
+
   ALL = "all"
   ACTIVE = "active"
   INACTIVE = "inactive"
 
 
 class SortOrder(str, Enum):
+  """Define ascending and descending list ordering values."""
+
   ASC = "asc"
   DESC = "desc"
 
@@ -68,6 +72,8 @@ def apply_bbox_filter(
   address_model,
   bbox: Optional[Tuple[float, float, float, float]],
 ) -> Select:
+  """Restrict a query to entities whose address lies inside a bounding box."""
+
   if not bbox:
     return query
 
@@ -86,6 +92,8 @@ def escape_like_pattern(value: str) -> str:
 
 
 def apply_search_filter(query: Select, search_term: Optional[str], *columns) -> Select:
+  """Apply escaped case-insensitive text search across selected columns."""
+
   if not search_term or not search_term.strip():
     return query
 
@@ -94,6 +102,8 @@ def apply_search_filter(query: Select, search_term: Optional[str], *columns) -> 
 
 
 def apply_lifecycle_filter(query: Select, model, status: LifecycleStatusFilter) -> Select:
+  """Apply the requested active or inactive lifecycle predicate."""
+
   if status == LifecycleStatusFilter.ACTIVE:
     return query.where(model.is_active.is_(True))
   if status == LifecycleStatusFilter.INACTIVE:

@@ -20,6 +20,8 @@ def _error_response(
   details: list[dict[str, Any]] | None = None,
   headers: dict[str, str] | None = None,
 ) -> JSONResponse:
+  """Build the uniform JSON error envelope returned by exception handlers."""
+
   return JSONResponse(
     status_code=status_code,
     content={
@@ -35,6 +37,8 @@ async def domain_exception_handler(
   request: Request,
   exc: DomainException,
 ) -> JSONResponse:
+  """Translate a domain exception into the uniform API error response."""
+
   del request
   headers = None
   if exc.status_code == status.HTTP_401_UNAUTHORIZED:
@@ -53,6 +57,8 @@ async def request_validation_exception_handler(
   request: Request,
   exc: RequestValidationError,
 ) -> JSONResponse:
+  """Translate Pydantic and FastAPI validation failures into field errors."""
+
   del request
   details: list[dict[str, Any]] = []
 
@@ -80,6 +86,8 @@ async def http_exception_handler(
   request: Request,
   exc: StarletteHTTPException,
 ) -> JSONResponse:
+  """Translate framework HTTP exceptions into the uniform error envelope."""
+
   del request
   message = str(exc.detail)
   error_code = "HTTP_ERROR"
@@ -99,6 +107,8 @@ async def http_exception_handler(
 
 
 def _integrity_error_metadata(exc: IntegrityError) -> tuple[int, str, str]:
+  """Map known database constraints to stable domain error metadata."""
+
   original = exc.orig
   sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
   constraint_name = getattr(getattr(original, "diag", None), "constraint_name", None)
@@ -142,6 +152,8 @@ async def integrity_error_handler(
   request: Request,
   exc: IntegrityError,
 ) -> JSONResponse:
+  """Translate database integrity violations into conflict responses."""
+
   del request
   status_code, error_code, message = _integrity_error_metadata(exc)
 
@@ -162,6 +174,8 @@ async def unexpected_exception_handler(
   request: Request,
   exc: Exception,
 ) -> JSONResponse:
+  """Log unexpected failures and return a generic server error."""
+
   logger.error(
     "Unhandled exception while processing %s %s",
     request.method,

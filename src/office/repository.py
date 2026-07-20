@@ -29,6 +29,8 @@ class OfficeRepository:
 
   @staticmethod
   async def get_by_id(db: AsyncSession, office_id: uuid.UUID) -> Office | None:
+    """Load one office and its owned address by identifier."""
+
     result = await db.execute(
       select(Office)
       .options(selectinload(Office.address))
@@ -60,6 +62,8 @@ class OfficeRepository:
     sort_by: OfficeSortField = OfficeSortField.NAME,
     order: SortOrder = SortOrder.ASC,
   ) -> tuple[list[Office], int]:
+    """Return a filtered, sorted, and paginated page of offices."""
+
     query = select(Office).options(selectinload(Office.address))
     query = apply_lifecycle_filter(query, Office, status)
     query = apply_search_filter(
@@ -87,10 +91,14 @@ class OfficeRepository:
 
   @staticmethod
   def add(db: AsyncSession, office: Office) -> None:
+    """Stage a new office row in the current transaction."""
+
     db.add(office)
 
   @staticmethod
   def add_history(db: AsyncSession, history_entry: OfficeHistory) -> None:
+    """Stage an immutable office history snapshot."""
+
     db.add(history_entry)
 
   @staticmethod
@@ -103,6 +111,8 @@ class OfficeRepository:
     start_date: datetime | None = None,
     end_date: datetime | None = None,
   ) -> tuple[list[OfficeHistory], int]:
+    """Return a paginated office history timeline."""
+
     query = select(OfficeHistory).where(OfficeHistory.office_id == office_id)
 
     if start_date:

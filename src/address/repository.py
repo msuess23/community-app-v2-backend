@@ -12,6 +12,8 @@ class AddressRepository:
 
   @staticmethod
   async def get_by_id(db: AsyncSession, address_id: uuid.UUID) -> Optional[Address]:
+    """Load one address by its identifier."""
+
     result = await db.execute(select(Address).where(Address.id == address_id))
     return result.scalar_one_or_none()
 

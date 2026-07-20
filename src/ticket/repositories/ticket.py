@@ -42,6 +42,8 @@ class TicketProjectionRepository:
 
   @staticmethod
   def _detail_query():
+    """Build the eager-loading query shared by ticket detail reads."""
+
     return select(Ticket).options(
       selectinload(Ticket.address),
       selectinload(Ticket.images),

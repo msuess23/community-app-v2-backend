@@ -6,6 +6,8 @@ from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
+  """Load and validate application configuration from environment variables."""
+
   # App configuration
   PROJECT_NAME: str
   BASE_URL: str
@@ -72,6 +74,8 @@ class Settings(BaseSettings):
 
   @model_validator(mode="after")
   def validate_startup_configuration(self) -> "Settings":
+    """Reject unsafe or incomplete startup configuration combinations."""
+
     if self.ENVIRONMENT == "production" and self.RUN_SEED_ON_STARTUP:
       raise ValueError("RUN_SEED_ON_STARTUP must be disabled in production")
 

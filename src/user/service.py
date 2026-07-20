@@ -57,6 +57,8 @@ class UserService:
     update_data: AdminUserUpdate,
     changed_by_user_id: uuid.UUID,
   ) -> tuple[Role, uuid.UUID | None]:
+    """Validate the role and office combination produced by an update."""
+
     resulting_role = update_data.role or user.role
 
     if user.role != Role.CITIZEN and resulting_role == Role.CITIZEN:
@@ -111,6 +113,8 @@ class UserService:
     update_data: Union[UserUpdate, AdminUserUpdate],
     changed_by_user_id: uuid.UUID,
   ) -> User:
+    """Apply profile changes and store the previous state in history."""
+
     if not user.is_active:
       raise DomainValidationException(
         "Cannot update a deactivated user profile.",
@@ -189,6 +193,8 @@ class UserService:
     sort_by: UserSortField = UserSortField.LAST_NAME,
     order: SortOrder = SortOrder.ASC,
   ) -> PaginatedResponse:
+    """Return users visible within the caller role and office scope."""
+
     if current_user.role != Role.ADMIN and status != LifecycleStatusFilter.ACTIVE:
       raise DomainValidationException(
         "Only administrators may filter inactive users.",
@@ -236,6 +242,8 @@ class UserService:
 
   @staticmethod
   async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User:
+    """Load one user account or raise the canonical not-found error."""
+
     user = await UserRepository.get_by_id(db, user_id)
     if user is None:
       raise ResourceNotFoundException(
@@ -251,6 +259,8 @@ class UserService:
     admin_id: uuid.UUID,
     change_reason: str,
   ) -> None:
+    """Deactivate an account and append its final active-state snapshot."""
+
     user = await UserService.get_user_by_id(db, user_id)
 
     if user.id == admin_id:

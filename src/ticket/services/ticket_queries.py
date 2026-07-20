@@ -30,6 +30,8 @@ class TicketQueryService:
     db: AsyncSession,
     ticket_ids: list[uuid.UUID],
   ):
+    """Load the latest citizen-visible status event for each ticket."""
+
     events = await TicketEventRepository.get_events_for_tickets(db, ticket_ids)
     return latest_status_events(events)
 

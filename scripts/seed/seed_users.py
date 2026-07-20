@@ -1,3 +1,5 @@
+"""Seed role-specific demo users and their initial history snapshots."""
+
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
