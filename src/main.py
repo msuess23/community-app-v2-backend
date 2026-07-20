@@ -24,6 +24,7 @@ from src.core.error_handlers import (
 )
 from src.core.exceptions import DomainException
 from src.core.scheduler import setup_scheduler, shutdown_scheduler
+from src.info.router import router as info_router
 from src.office.router import router as office_router
 from src.ticket.router import router as ticket_router
 from src.user.router import router as user_router
@@ -94,6 +95,11 @@ app.include_router(
   office_router,
   prefix=f"{settings.BASE_URL}/offices",
   tags=["Offices"],
+)
+app.include_router(
+  info_router,
+  prefix=f"{settings.BASE_URL}/infos",
+  tags=["Infos"],
 )
 app.include_router(
   ticket_router,
