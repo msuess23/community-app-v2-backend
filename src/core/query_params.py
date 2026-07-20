@@ -88,6 +88,15 @@ def get_created_date_range(
   return _validated_range(created_from, created_to)
 
 
+def get_starts_date_range(
+  starts_from: datetime | None = Query(None),
+  starts_to: datetime | None = Query(None),
+) -> DateRangeParams:
+  """Validate the starts_from/starts_to appointment parameters."""
+
+  return _validated_range(starts_from, starts_to)
+
+
 def get_updated_date_range(
   updated_from: datetime | None = Query(None),
   updated_to: datetime | None = Query(None),

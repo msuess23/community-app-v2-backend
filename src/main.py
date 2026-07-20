@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import src.models  # noqa: F401
 
 from scripts.seed.run_seed import seed_database
+from src.appointment.router import router as appointment_router
 from src.auth.router import router as auth_router
 from src.core.config import settings
 from src.core.database import engine
@@ -73,6 +74,11 @@ app.add_exception_handler(RequestValidationError, request_validation_exception_h
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(IntegrityError, integrity_error_handler)
 app.add_exception_handler(Exception, unexpected_exception_handler)
+
+app.include_router(
+  appointment_router,
+  prefix=settings.BASE_URL,
+)
 
 app.include_router(
   auth_router,
