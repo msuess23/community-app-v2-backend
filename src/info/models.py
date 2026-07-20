@@ -12,13 +12,16 @@ from sqlalchemy import (
   DateTime,
   Enum,
   ForeignKey,
+  Index,
   String,
   Text,
+  text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from src.core.database import Base
+from src.media.models import ImageMetadataMixin
 
 
 class InfoCategory(str, enum.Enum):
@@ -121,6 +124,59 @@ class Info(Base):
     cascade="all, delete-orphan",
     passive_deletes=True,
   )
+  images = relationship(
+    "InfoImage",
+    back_populates="info",
+    cascade="all, delete-orphan",
+    passive_deletes=True,
+    order_by="InfoImage.uploaded_at, InfoImage.id",
+    lazy="selectin",
+  )
+
+
+class InfoImage(ImageMetadataMixin, Base):
+  """One current CRUD-owned image that is physically deleted with its Info."""
+
+  __tablename__ = "info_images"
+  __table_args__ = (
+    CheckConstraint("size_bytes > 0", name="ck_info_images_positive_size"),
+    CheckConstraint(
+      "width IS NULL OR width > 0",
+      name="ck_info_images_positive_width",
+    ),
+    CheckConstraint(
+      "height IS NULL OR height > 0",
+      name="ck_info_images_positive_height",
+    ),
+    Index(
+      "uq_info_images_cover",
+      "info_id",
+      unique=True,
+      postgresql_where=text("is_cover"),
+    ),
+  )
+
+  info_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("infos.id", ondelete="CASCADE"),
+    nullable=False,
+    index=True,
+  )
+  uploaded_by_user_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("users.id"),
+    nullable=False,
+    index=True,
+  )
+
+  info = relationship("Info", back_populates="images")
+  uploaded_by = relationship("User", foreign_keys=[uploaded_by_user_id])
+
+  @property
+  def is_active(self) -> bool:
+    """Expose the shared cover-helper shape; CRUD images are always current."""
+
+    return True
 
 
 class InfoStatusEntry(Base):

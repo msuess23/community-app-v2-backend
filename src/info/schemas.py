@@ -15,6 +15,7 @@ from src.core.validation import (
   NormalizedRequiredText,
 )
 from src.info.models import InfoCategory, InfoStatus
+from src.media.schemas import ImageMetadataResponse
 
 
 def _require_timezone(value: datetime) -> datetime:
@@ -97,6 +98,12 @@ class InfoStatusResponse(BaseModel):
   created_at: datetime
 
   model_config = ConfigDict(from_attributes=True)
+
+
+class InfoImageResponse(ImageMetadataResponse):
+  """Public metadata for one current image owned by an Info."""
+
+  info_id: UUID
 
 
 class InfoResponse(BaseModel):

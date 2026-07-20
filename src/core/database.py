@@ -4,7 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import declarative_base
 
 from src.core.config import settings
-from src.core.transaction_files import clear_rollback_files, cleanup_rollback_files
+from src.core.transaction_files import (
+  clear_commit_file_deletes,
+  clear_rollback_files,
+  cleanup_commit_file_deletes,
+  cleanup_rollback_files,
+)
 
 # Create async engine for PostgreSQL
 engine = create_async_engine(
@@ -36,8 +41,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     try:
       yield session
       await session.commit()
+      cleanup_commit_file_deletes(session)
       clear_rollback_files(session)
     except Exception:
       await session.rollback()
+      clear_commit_file_deletes(session)
       cleanup_rollback_files(session)
       raise

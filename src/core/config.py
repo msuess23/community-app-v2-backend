@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
   )
 
+  # Ordinary CRUD image storage for public information notices
+  INFO_MEDIA_ROOT: str = "./data/info-media"
+  INFO_IMAGE_MAX_BYTES: int = Field(default=5 * 1024 * 1024, ge=1)
+  INFO_IMAGE_ALLOWED_MIME_TYPES: list[str] = Field(
+    default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
+  )
+
   # Versioned appointment PDF storage
   APPOINTMENT_DOCUMENT_ROOT: str = "./data/appointment-documents"
   APPOINTMENT_DOCUMENT_MAX_BYTES: int = Field(default=10 * 1024 * 1024, ge=1)
@@ -72,6 +79,8 @@ class Settings(BaseSettings):
 
     if not self.TICKET_IMAGE_ALLOWED_MIME_TYPES:
       raise ValueError("TICKET_IMAGE_ALLOWED_MIME_TYPES must not be empty")
+    if not self.INFO_IMAGE_ALLOWED_MIME_TYPES:
+      raise ValueError("INFO_IMAGE_ALLOWED_MIME_TYPES must not be empty")
 
     return self
 

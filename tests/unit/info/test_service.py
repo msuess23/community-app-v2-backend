@@ -6,7 +6,8 @@ import pytest
 
 from src.address.models import Address
 from src.core.exceptions import ForbiddenException
-from src.info.models import Info, InfoCategory, InfoStatus, InfoStatusEntry
+from src.info.image_service import InfoImageService
+from src.info.models import Info, InfoCategory, InfoImage, InfoStatus, InfoStatusEntry
 from src.info.repository import InfoRepository, InfoStatusRepository
 from src.info.schemas import (
   InfoCreateRequest,
@@ -210,12 +211,33 @@ async def test_delete_is_a_physical_repository_delete(monkeypatch) -> None:
     "get_by_id",
     AsyncMock(return_value=info),
   )
+  image = InfoImage(
+    id=uuid.uuid4(),
+    info_id=info.id,
+    storage_key=f"{info.id}/cover.png",
+    original_filename="cover.png",
+    mime_type="image/png",
+    size_bytes=100,
+    width=20,
+    height=10,
+    uploaded_by_user_id=manager.id,
+    uploaded_at=datetime.now(timezone.utc),
+    is_cover=True,
+  )
+  info.images = [image]
   delete = AsyncMock()
+  register_files = MagicMock()
   monkeypatch.setattr(InfoRepository, "delete", delete)
+  monkeypatch.setattr(
+    InfoImageService,
+    "register_file_deletions",
+    register_files,
+  )
   db = _db()
 
   await InfoService.delete_info(db, info.id, manager)
 
+  register_files.assert_called_once_with(db, [image])
   delete.assert_awaited_once_with(db, info)
   db.flush.assert_awaited_once()
 
@@ -252,3 +274,28 @@ async def test_status_update_mutates_current_state_and_appends_history(monkeypat
   assert response.status == InfoStatus.ACTIVE
   assert response.message == "Work started"
   assert staged[0].info_id == info.id
+
+
+def test_info_response_exposes_current_cover_content_url() -> None:
+  manager = _user(Role.MANAGER, office_id=uuid.uuid4())
+  info = _info(manager.office_id)
+  cover = InfoImage(
+    id=uuid.uuid4(),
+    info_id=info.id,
+    storage_key=f"{info.id}/cover.png",
+    original_filename="cover.png",
+    mime_type="image/png",
+    size_bytes=100,
+    width=20,
+    height=10,
+    uploaded_by_user_id=manager.id,
+    uploaded_at=datetime.now(timezone.utc),
+    is_cover=True,
+  )
+  info.images = [cover]
+
+  response = InfoService._response(info, _status(info, manager))
+
+  assert response.image_url == (
+    f"/api/v1/infos/{info.id}/images/{cover.id}/content"
+  )

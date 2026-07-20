@@ -6,7 +6,8 @@ import uuid
 from datetime import datetime
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import role_required
@@ -14,9 +15,11 @@ from src.core.database import get_db
 from src.core.filters import SortOrder, get_bbox_filter
 from src.core.query_params import PageParams, SearchParams, get_page_params, get_search_params
 from src.core.schemas import PaginatedResponse
+from src.info.image_service import InfoImageService
 from src.info.models import InfoCategory, InfoSortField, InfoStatus
 from src.info.schemas import (
   InfoCreateRequest,
+  InfoImageResponse,
   InfoResponse,
   InfoStatusCreateRequest,
   InfoStatusResponse,
@@ -150,3 +153,97 @@ async def update_info_status(
   """Append one status message and update the Info's current status."""
 
   return await InfoService.add_status(db, info_id, request, current_user)
+
+
+@router.get(
+  "/{info_id}/images",
+  response_model=list[InfoImageResponse],
+)
+async def list_info_images(
+  info_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db, scope="function"),
+):
+  """List every current image owned by one public Info."""
+
+  return await InfoImageService.list_images(db, info_id)
+
+
+@router.post(
+  "/{info_id}/images",
+  response_model=InfoImageResponse,
+  status_code=status.HTTP_201_CREATED,
+)
+async def upload_info_image(
+  info_id: uuid.UUID,
+  file: UploadFile = File(...),
+  db: AsyncSession = Depends(get_db, scope="function"),
+  current_user: User = Depends(
+    role_required(Role.OFFICER, Role.MANAGER, Role.ADMIN)
+  ),
+):
+  """Upload one validated current image without creating a revision."""
+
+  return await InfoImageService.add_image(db, info_id, file, current_user)
+
+
+@router.put(
+  "/{info_id}/images/{image_id}/cover",
+  response_model=InfoImageResponse,
+)
+async def set_info_cover_image(
+  info_id: uuid.UUID,
+  image_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db, scope="function"),
+  current_user: User = Depends(
+    role_required(Role.OFFICER, Role.MANAGER, Role.ADMIN)
+  ),
+):
+  """Select the image exposed as the Info cover."""
+
+  return await InfoImageService.set_cover(
+    db,
+    info_id,
+    image_id,
+    current_user,
+  )
+
+
+@router.delete(
+  "/{info_id}/images/{image_id}",
+  status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_info_image(
+  info_id: uuid.UUID,
+  image_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db, scope="function"),
+  current_user: User = Depends(
+    role_required(Role.OFFICER, Role.MANAGER, Role.ADMIN)
+  ),
+):
+  """Physically delete one image row and its file after commit."""
+
+  await InfoImageService.delete_image(
+    db,
+    info_id,
+    image_id,
+    current_user,
+  )
+
+
+@router.get(
+  "/{info_id}/images/{image_id}/content",
+  response_class=FileResponse,
+)
+async def get_info_image_content(
+  info_id: uuid.UUID,
+  image_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db, scope="function"),
+):
+  """Stream one current public Info image."""
+
+  path, image = await InfoImageService.get_content(db, info_id, image_id)
+  return FileResponse(
+    path=path,
+    media_type=image.mime_type,
+    filename=image.original_filename,
+  )

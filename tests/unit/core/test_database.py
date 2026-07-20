@@ -142,3 +142,53 @@ async def test_commit_error_removes_registered_files(monkeypatch, tmp_path):
     await anext(dependency)
 
   assert not staged_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_successful_commit_removes_files_registered_for_deletion(
+  monkeypatch,
+  tmp_path,
+):
+  from src.core.transaction_files import register_commit_file_delete
+
+  session = make_session()
+  existing_file = tmp_path / "obsolete.jpg"
+  existing_file.write_bytes(b"old")
+  register_commit_file_delete(session, existing_file)
+  monkeypatch.setattr(
+    database,
+    "AsyncSessionLocal",
+    lambda: SessionContext(session),
+  )
+
+  dependency = database.get_db()
+  await anext(dependency)
+  with pytest.raises(StopAsyncIteration):
+    await anext(dependency)
+
+  assert not existing_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_rollback_keeps_files_registered_for_post_commit_deletion(
+  monkeypatch,
+  tmp_path,
+):
+  from src.core.transaction_files import register_commit_file_delete
+
+  session = make_session()
+  existing_file = tmp_path / "still-referenced.jpg"
+  existing_file.write_bytes(b"old")
+  register_commit_file_delete(session, existing_file)
+  monkeypatch.setattr(
+    database,
+    "AsyncSessionLocal",
+    lambda: SessionContext(session),
+  )
+
+  dependency = database.get_db()
+  await anext(dependency)
+  with pytest.raises(RuntimeError, match="boom"):
+    await dependency.athrow(RuntimeError("boom"))
+
+  assert existing_file.exists()

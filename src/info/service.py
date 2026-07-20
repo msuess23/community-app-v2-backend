@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.address.service import AddressService
+from src.core.config import settings
 from src.core.exceptions import (
   DomainValidationException,
   ForbiddenException,
@@ -45,6 +46,15 @@ class InfoService:
 
   @staticmethod
   def _response(info: Info, current_status: InfoStatusEntry) -> InfoResponse:
+    cover = next(
+      (image for image in getattr(info, "images", []) if image.is_cover),
+      None,
+    )
+    image_url = (
+      f"{settings.BASE_URL}/infos/{info.id}/images/{cover.id}/content"
+      if cover is not None
+      else None
+    )
     return InfoResponse(
       id=info.id,
       title=info.title,
@@ -57,7 +67,7 @@ class InfoService:
       starts_at=info.starts_at,
       ends_at=info.ends_at,
       current_status=InfoService._status_response(current_status),
-      image_url=None,
+      image_url=image_url,
     )
 
   @staticmethod
@@ -311,6 +321,9 @@ class InfoService:
         error_code="INFO_NOT_FOUND",
       )
     InfoService._require_manage_permission(info, current_user)
+    from src.info.image_service import InfoImageService
+
+    InfoImageService.register_file_deletions(db, list(info.images))
     await InfoRepository.delete(db, info)
     await db.flush()
 

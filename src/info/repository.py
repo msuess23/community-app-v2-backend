@@ -15,6 +15,7 @@ from src.core.pagination import execute_page
 from src.info.models import (
   Info,
   InfoCategory,
+  InfoImage,
   InfoSortField,
   InfoStatus,
   InfoStatusEntry,
@@ -34,7 +35,10 @@ class InfoRepository:
 
   @staticmethod
   def _detail_query():
-    return select(Info).options(selectinload(Info.address))
+    return select(Info).options(
+      selectinload(Info.address),
+      selectinload(Info.images),
+    )
 
   @staticmethod
   async def get_by_id(
@@ -98,6 +102,50 @@ class InfoRepository:
   @staticmethod
   async def delete(db: AsyncSession, info: Info) -> None:
     await db.delete(info)
+
+
+class InfoImageRepository:
+  """CRUD persistence for current Info image metadata."""
+
+  @staticmethod
+  def add(db: AsyncSession, image: InfoImage) -> None:
+    db.add(image)
+
+  @staticmethod
+  async def get_image(
+    db: AsyncSession,
+    info_id: uuid.UUID,
+    image_id: uuid.UUID,
+    *,
+    for_update: bool = False,
+  ) -> InfoImage | None:
+    query = select(InfoImage).where(
+      InfoImage.info_id == info_id,
+      InfoImage.id == image_id,
+    )
+    if for_update:
+      query = query.with_for_update()
+    return (await db.execute(query)).scalar_one_or_none()
+
+  @staticmethod
+  async def get_images(
+    db: AsyncSession,
+    info_id: uuid.UUID,
+    *,
+    for_update: bool = False,
+  ) -> list[InfoImage]:
+    query = (
+      select(InfoImage)
+      .where(InfoImage.info_id == info_id)
+      .order_by(InfoImage.uploaded_at.asc(), InfoImage.id.asc())
+    )
+    if for_update:
+      query = query.with_for_update()
+    return list((await db.execute(query)).scalars().all())
+
+  @staticmethod
+  async def delete(db: AsyncSession, image: InfoImage) -> None:
+    await db.delete(image)
 
 
 class InfoStatusRepository:
