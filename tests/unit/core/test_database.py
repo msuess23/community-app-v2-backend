@@ -21,6 +21,7 @@ def make_session():
   session = AsyncMock()
   session.commit = AsyncMock()
   session.rollback = AsyncMock()
+  session.info = {}
   return session
 
 
@@ -117,3 +118,27 @@ def test_http_database_dependencies_finish_before_response() -> None:
       if dependency.call is database.get_db:
         assert dependency.scope == "function", route.path
       dependencies.extend(dependency.dependencies)
+
+
+@pytest.mark.asyncio
+async def test_commit_error_removes_registered_files(monkeypatch, tmp_path):
+  from src.core.transaction_files import register_rollback_file
+
+  session = make_session()
+  session.commit.side_effect = RuntimeError("commit failed")
+  staged_file = tmp_path / "staged.pdf"
+  staged_file.write_bytes(b"content")
+  register_rollback_file(session, staged_file)
+  monkeypatch.setattr(
+    database,
+    "AsyncSessionLocal",
+    lambda: SessionContext(session),
+  )
+
+  dependency = database.get_db()
+  await anext(dependency)
+
+  with pytest.raises(RuntimeError, match="commit failed"):
+    await anext(dependency)
+
+  assert not staged_file.exists()

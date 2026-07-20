@@ -15,6 +15,10 @@ from src.core.exceptions import (
   ForbiddenException,
   ResourceNotFoundException,
 )
+from src.core.transaction_files import (
+  register_rollback_file,
+  unregister_rollback_file,
+)
 from src.media.cover import (
   apply_cover_change,
   new_image_should_be_cover,
@@ -168,6 +172,11 @@ class TicketImageService:
       image_id=image_id,
       config=storage_config,
     )
+    stored_path = LocalImageStorage.resolve_file(
+      stored.storage_key,
+      config=storage_config,
+    )
+    register_rollback_file(db, stored_path)
     active_images = await TicketImageRepository.get_images(
       db,
       ticket.id,
@@ -214,6 +223,7 @@ class TicketImageService:
     except Exception:
       # Failures before the request commit must not leave an unreferenced file.
       LocalImageStorage.delete_file(stored.storage_key, config=storage_config)
+      unregister_rollback_file(db, stored_path)
       raise
 
     return TicketImageService._response(image)

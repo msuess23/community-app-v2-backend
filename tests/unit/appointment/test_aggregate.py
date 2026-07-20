@@ -98,3 +98,42 @@ def test_booking_is_the_only_valid_initial_event() -> None:
       AppointmentCompletedPayload(comment=None),
       occurred_at=now,
     )
+
+
+def test_document_event_advances_version_without_changing_schedule() -> None:
+  from src.appointment.domain import (
+    AppointmentDocumentType,
+    DocumentVersionAddedPayload,
+  )
+
+  now = datetime.now(timezone.utc)
+  booking = _booking_payload(now)
+  state = evolve_appointment(
+    None,
+    AppointmentEventType.APPOINTMENT_BOOKED,
+    booking,
+    occurred_at=now,
+  )
+  document = DocumentVersionAddedPayload(
+    document_group_id=uuid.uuid4(),
+    document_version_id=uuid.uuid4(),
+    version_number=1,
+    document_type=AppointmentDocumentType.NOTICE,
+    storage_key="appointment/group/document.pdf",
+    original_filename="notice.pdf",
+    mime_type="application/pdf",
+    size_bytes=128,
+    visible_to_citizen=True,
+  )
+
+  resulting = evolve_appointment(
+    state,
+    AppointmentEventType.DOCUMENT_VERSION_ADDED,
+    document,
+    occurred_at=now + timedelta(minutes=1),
+  )
+
+  assert resulting.version == 2
+  assert resulting.current_slot_id == state.current_slot_id
+  assert resulting.starts_at == state.starts_at
+  assert resulting.status == state.status

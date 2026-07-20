@@ -300,15 +300,19 @@ class AppointmentService:
     *,
     include_actor: bool,
   ) -> AppointmentEventResponse:
-    """Map one event while hiding authority identifiers from citizens."""
+    """Map one event while hiding internal identifiers from citizens."""
 
+    payload = dict(event.payload)
+    if not include_actor:
+      # Storage keys are implementation details and never belong in citizen APIs.
+      payload.pop("storage_key", None)
     return AppointmentEventResponse(
       id=event.id,
       sequence_number=event.sequence_number,
       event_type=event.event_type,
       actor_user_id=event.actor_user_id if include_actor else None,
       occurred_at=event.occurred_at,
-      payload=dict(event.payload),
+      payload=payload,
     )
 
   @staticmethod
@@ -331,15 +335,16 @@ class AppointmentService:
         "Appointment not found",
         error_code="APPOINTMENT_NOT_FOUND",
       )
+    include_actor = AppointmentAccessPolicy.can_manage_office(
+      appointment.office_id,
+      current_user,
+    )
     events, total = await AppointmentEventRepository.get_event_page(
       db,
       appointment_id,
       page=page,
       size=size,
-    )
-    include_actor = AppointmentAccessPolicy.can_manage_office(
-      appointment.office_id,
-      current_user,
+      citizen_visible_only=not include_actor,
     )
     return PaginatedResponse.create(
       data=[

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.appointment.domain import (
   AppointmentAction,
+  AppointmentDocumentType,
   AppointmentEventType,
   AppointmentSlotStatus,
   AppointmentStatus,
@@ -124,3 +125,21 @@ class AppointmentEventResponse(BaseModel):
   actor_user_id: UUID | None = None
   occurred_at: datetime
   payload: dict[str, Any]
+
+
+class AppointmentDocumentResponse(BaseModel):
+  """Metadata for one immutable appointment document version."""
+
+  id: UUID
+  document_group_id: UUID
+  appointment_id: UUID
+  version_number: int
+  document_type: AppointmentDocumentType
+  original_filename: str
+  mime_type: str
+  size_bytes: int
+  uploaded_at: datetime
+  is_current: bool
+  visible_to_citizen: bool
+  replaced_version_id: UUID | None = None
+  url: str

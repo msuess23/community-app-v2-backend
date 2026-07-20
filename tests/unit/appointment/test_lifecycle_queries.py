@@ -72,3 +72,29 @@ def test_citizen_event_response_hides_actor_identifier() -> None:
 
   assert public.actor_user_id is None
   assert internal.actor_user_id == event.actor_user_id
+
+
+def test_citizen_document_event_hides_storage_key() -> None:
+  from src.appointment.domain import AppointmentEventType
+  from src.appointment.models import AppointmentEvent
+  from src.appointment.service import AppointmentService
+
+  event = AppointmentEvent(
+    id=uuid.uuid4(),
+    appointment_id=uuid.uuid4(),
+    sequence_number=2,
+    event_type=AppointmentEventType.DOCUMENT_VERSION_ADDED,
+    actor_user_id=uuid.uuid4(),
+    occurred_at=datetime.now(timezone.utc),
+    payload={
+      "document_group_id": str(uuid.uuid4()),
+      "document_version_id": str(uuid.uuid4()),
+      "storage_key": "private/path/document.pdf",
+      "visible_to_citizen": True,
+    },
+  )
+
+  response = AppointmentService.event_response(event, include_actor=False)
+
+  assert response.actor_user_id is None
+  assert "storage_key" not in response.payload

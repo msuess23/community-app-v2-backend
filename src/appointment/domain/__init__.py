@@ -7,6 +7,7 @@ from src.appointment.domain.aggregate import (
 )
 from src.appointment.domain.enums import (
   AppointmentAction,
+  AppointmentDocumentType,
   AppointmentEventType,
   AppointmentSlotSortField,
   AppointmentSlotStatus,
@@ -25,6 +26,7 @@ from src.appointment.domain.payloads import (
 
 __all__ = [
   "AppointmentAction",
+  "AppointmentDocumentType",
   "AppointmentBookedPayload",
   "AppointmentCancelledPayload",
   "AppointmentCompletedPayload",

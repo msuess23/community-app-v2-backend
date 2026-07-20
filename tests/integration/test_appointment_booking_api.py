@@ -461,3 +461,185 @@ async def test_appointment_lifecycle_and_reschedule_concurrency(monkeypatch) -> 
   finally:
     async with engine.begin() as connection:
       await connection.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_appointment_document_versions_are_audited_and_access_controlled(
+  monkeypatch,
+  tmp_path,
+) -> None:
+  """Retain PDF revisions while exposing only the current citizen-visible file."""
+
+  if "test" not in settings.POSTGRES_DB.lower():
+    pytest.fail("PostgreSQL integration tests require a disposable test database")
+
+  monkeypatch.setattr(settings, "RUN_SEED_ON_STARTUP", False)
+  monkeypatch.setattr(settings, "ENABLE_SCHEDULER", False)
+  monkeypatch.setattr(settings, "APPOINTMENT_DOCUMENT_ROOT", str(tmp_path))
+
+  async with engine.begin() as connection:
+    await connection.run_sync(Base.metadata.drop_all)
+    await connection.run_sync(Base.metadata.create_all)
+
+  office_id = uuid.uuid4()
+  manager_id = uuid.uuid4()
+  citizen_id = uuid.uuid4()
+  now = datetime.now(timezone.utc)
+  pdf_v1 = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+  pdf_v2 = b"%PDF-1.4\n2 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+
+  try:
+    async with AsyncSessionLocal() as db:
+      db.add_all(
+        [
+          Office(
+            id=office_id,
+            name="Appointment Document Office",
+            services=[],
+            opening_hours={},
+            is_active=True,
+          ),
+          User(
+            id=manager_id,
+            email="document.manager@example.com",
+            hashed_password=get_password_hash("password123"),
+            first_name="Document",
+            last_name="Manager",
+            role=Role.MANAGER,
+            office_id=office_id,
+            is_active=True,
+          ),
+          User(
+            id=citizen_id,
+            email="document.citizen@example.com",
+            hashed_password=get_password_hash("password123"),
+            first_name="Document",
+            last_name="Citizen",
+            role=Role.CITIZEN,
+            is_active=True,
+          ),
+        ]
+      )
+      await db.commit()
+
+    async with lifespan(app):
+      transport = httpx.ASGITransport(app=app)
+      async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+      ) as client:
+        manager_token = await _login(client, "document.manager@example.com")
+        citizen_token = await _login(client, "document.citizen@example.com")
+
+        start = now + timedelta(days=2)
+        slots = await client.post(
+          f"/api/v1/offices/{office_id}/appointment-slots",
+          headers=_headers(manager_token),
+          json={
+            "slots": [
+              {
+                "starts_at": start.isoformat(),
+                "ends_at": (start + timedelta(minutes=30)).isoformat(),
+              }
+            ]
+          },
+        )
+        assert slots.status_code == 201
+        booking = await client.post(
+          f"/api/v1/appointment-slots/{slots.json()[0]['id']}/book",
+          headers=_headers(citizen_token),
+          json={"reason": "Appointment with versioned documents"},
+        )
+        assert booking.status_code == 201
+        appointment_id = booking.json()["id"]
+
+        first = await client.post(
+          f"/api/v1/appointments/{appointment_id}/documents",
+          headers=_headers(manager_token),
+          files={"file": ("notice-v1.pdf", pdf_v1, "application/pdf")},
+          data={
+            "document_type": "NOTICE",
+            "visible_to_citizen": "true",
+          },
+        )
+        assert first.status_code == 201
+        first_document = first.json()
+        assert first_document["version_number"] == 1
+
+        replacement = await client.post(
+          f"/api/v1/appointments/{appointment_id}/documents",
+          headers=_headers(manager_token),
+          files={"file": ("notice-v2.pdf", pdf_v2, "application/pdf")},
+          data={
+            "document_type": "NOTICE",
+            "visible_to_citizen": "true",
+            "replace_document_group_id": first_document["document_group_id"],
+          },
+        )
+        assert replacement.status_code == 201
+        second_document = replacement.json()
+        assert second_document["version_number"] == 2
+        assert second_document["replaced_version_id"] == first_document["id"]
+
+        citizen_documents = await client.get(
+          f"/api/v1/appointments/{appointment_id}/documents",
+          headers=_headers(citizen_token),
+        )
+        assert citizen_documents.status_code == 200
+        assert [item["id"] for item in citizen_documents.json()] == [
+          second_document["id"]
+        ]
+
+        old_citizen_download = await client.get(
+          f"/api/v1/appointments/{appointment_id}/documents/"
+          f"{first_document['id']}/content",
+          headers=_headers(citizen_token),
+        )
+        current_citizen_download = await client.get(
+          f"/api/v1/appointments/{appointment_id}/documents/"
+          f"{second_document['id']}/content",
+          headers=_headers(citizen_token),
+        )
+        assert old_citizen_download.status_code == 404
+        assert current_citizen_download.status_code == 200
+        assert current_citizen_download.content == pdf_v2
+
+        versions = await client.get(
+          f"/api/v1/appointments/{appointment_id}/documents/"
+          f"{first_document['document_group_id']}/versions",
+          headers=_headers(manager_token),
+        )
+        assert versions.status_code == 200
+        assert [item["version_number"] for item in versions.json()] == [2, 1]
+
+        old_staff_download = await client.get(
+          f"/api/v1/appointments/{appointment_id}/documents/"
+          f"{first_document['id']}/content",
+          headers=_headers(manager_token),
+        )
+        assert old_staff_download.status_code == 200
+        assert old_staff_download.content == pdf_v1
+
+        events = await client.get(
+          f"/api/v1/appointments/{appointment_id}/events",
+          headers=_headers(manager_token),
+        )
+        assert events.status_code == 200
+        assert [item["event_type"] for item in events.json()["data"]] == [
+          "APPOINTMENT_BOOKED",
+          "DOCUMENT_VERSION_ADDED",
+          "DOCUMENT_VERSION_ADDED",
+        ]
+
+    async with AsyncSessionLocal() as db:
+      appointment = await AppointmentRepository.get_by_id(
+        db,
+        uuid.UUID(appointment_id),
+      )
+      assert appointment is not None
+      assert appointment.version == 3
+      rebuilt = await AppointmentEventStore.rebuild(db, appointment.id)
+      assert rebuilt == AppointmentEventStore.state_from_appointment(appointment)
+  finally:
+    async with engine.begin() as connection:
+      await connection.run_sync(Base.metadata.drop_all)

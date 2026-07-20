@@ -5,17 +5,23 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.appointment.domain import (
+  AppointmentEventType,
   AppointmentSlotSortField,
   AppointmentSlotStatus,
   AppointmentSortField,
   AppointmentStatus,
 )
-from src.appointment.models import Appointment, AppointmentEvent, AppointmentSlot
+from src.appointment.models import (
+  Appointment,
+  AppointmentDocument,
+  AppointmentEvent,
+  AppointmentSlot,
+)
 from src.core.filters import SortOrder, apply_search_filter
 from src.core.pagination import execute_page
 from src.office.models import Office
@@ -344,12 +350,20 @@ class AppointmentEventRepository:
     *,
     page: int,
     size: int,
+    citizen_visible_only: bool = False,
   ) -> tuple[list[AppointmentEvent], int]:
-    """Return a chronological page from one appointment event stream."""
+    """Return a chronological event page with optional citizen filtering."""
 
     query = select(AppointmentEvent).where(
       AppointmentEvent.appointment_id == appointment_id
     )
+    if citizen_visible_only:
+      query = query.where(
+        or_(
+          AppointmentEvent.event_type != AppointmentEventType.DOCUMENT_VERSION_ADDED,
+          AppointmentEvent.payload["visible_to_citizen"].as_boolean().is_(True),
+        )
+      )
     return await execute_page(
       db,
       query,
@@ -373,3 +387,92 @@ class AppointmentEventRepository:
       .order_by(AppointmentEvent.sequence_number.asc())
     )
     return list(result.scalars().all())
+
+
+class AppointmentDocumentRepository:
+  """Persist and read immutable versions of appointment documents."""
+
+  @staticmethod
+  def add(db: AsyncSession, document: AppointmentDocument) -> None:
+    """Stage one new immutable document version."""
+
+    db.add(document)
+
+  @staticmethod
+  async def get_current_documents(
+    db: AsyncSession,
+    appointment_id: uuid.UUID,
+    *,
+    visible_only: bool = False,
+  ) -> list[AppointmentDocument]:
+    """Return current document versions in deterministic upload order."""
+
+    query = select(AppointmentDocument).where(
+      AppointmentDocument.appointment_id == appointment_id,
+      AppointmentDocument.is_current.is_(True),
+    )
+    if visible_only:
+      query = query.where(AppointmentDocument.visible_to_citizen.is_(True))
+    result = await db.execute(
+      query.order_by(
+        AppointmentDocument.uploaded_at.asc(),
+        AppointmentDocument.id.asc(),
+      )
+    )
+    return list(result.scalars().all())
+
+  @staticmethod
+  async def get_current_for_group(
+    db: AsyncSession,
+    *,
+    appointment_id: uuid.UUID,
+    document_group_id: uuid.UUID,
+    for_update: bool = False,
+  ) -> AppointmentDocument | None:
+    """Load the current version of one document group."""
+
+    query = select(AppointmentDocument).where(
+      AppointmentDocument.appointment_id == appointment_id,
+      AppointmentDocument.document_group_id == document_group_id,
+      AppointmentDocument.is_current.is_(True),
+    )
+    if for_update:
+      query = query.with_for_update()
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+  @staticmethod
+  async def get_versions(
+    db: AsyncSession,
+    *,
+    appointment_id: uuid.UUID,
+    document_group_id: uuid.UUID,
+  ) -> list[AppointmentDocument]:
+    """Return every retained version of one document group."""
+
+    result = await db.execute(
+      select(AppointmentDocument)
+      .where(
+        AppointmentDocument.appointment_id == appointment_id,
+        AppointmentDocument.document_group_id == document_group_id,
+      )
+      .order_by(AppointmentDocument.version_number.desc())
+    )
+    return list(result.scalars().all())
+
+  @staticmethod
+  async def get_by_id(
+    db: AsyncSession,
+    *,
+    appointment_id: uuid.UUID,
+    document_version_id: uuid.UUID,
+  ) -> AppointmentDocument | None:
+    """Load one concrete document version within an appointment."""
+
+    result = await db.execute(
+      select(AppointmentDocument).where(
+        AppointmentDocument.id == document_version_id,
+        AppointmentDocument.appointment_id == appointment_id,
+      )
+    )
+    return result.scalar_one_or_none()

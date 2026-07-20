@@ -43,6 +43,16 @@ class AppointmentAction(str, enum.Enum):
   MARK_NO_SHOW = "MARK_NO_SHOW"
 
 
+class AppointmentDocumentType(str, enum.Enum):
+  """Small controlled vocabulary for versioned appointment PDFs."""
+
+  CONFIRMATION = "CONFIRMATION"
+  FORM = "FORM"
+  NOTICE = "NOTICE"
+  PROTOCOL = "PROTOCOL"
+  OTHER = "OTHER"
+
+
 class AppointmentSortField(str, enum.Enum):
   """Allowed sort columns for appointment list endpoints."""
 

@@ -6,19 +6,25 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+  BigInteger,
+  Boolean,
   CheckConstraint,
   Column,
   DateTime,
   Enum,
   ForeignKey,
+  Index,
   Integer,
+  String,
   Text,
   UniqueConstraint,
+  text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from src.appointment.domain import (
+  AppointmentDocumentType,
   AppointmentEventType,
   AppointmentSlotStatus,
   AppointmentStatus,
@@ -151,6 +157,88 @@ class Appointment(Base):
     back_populates="appointment",
     order_by="AppointmentEvent.sequence_number",
     cascade="all, delete-orphan",
+  )
+  documents = relationship(
+    "AppointmentDocument",
+    back_populates="appointment",
+    order_by="AppointmentDocument.uploaded_at",
+    cascade="all, delete-orphan",
+  )
+
+
+class AppointmentDocument(Base):
+  """One immutable PDF version belonging to an appointment document group."""
+
+  __tablename__ = "appointment_documents"
+  __table_args__ = (
+    CheckConstraint(
+      "version_number >= 1",
+      name="ck_appointment_documents_version_positive",
+    ),
+    CheckConstraint(
+      "size_bytes > 0",
+      name="ck_appointment_documents_size_positive",
+    ),
+    CheckConstraint(
+      "document_type IN ('CONFIRMATION', 'FORM', 'NOTICE', 'PROTOCOL', 'OTHER')",
+      name="ck_appointment_documents_type",
+    ),
+    UniqueConstraint(
+      "document_group_id",
+      "version_number",
+      name="uq_appointment_documents_group_version",
+    ),
+    Index(
+      "uq_appointment_documents_current_group",
+      "document_group_id",
+      unique=True,
+      postgresql_where=text("is_current"),
+    ),
+  )
+
+  id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+  document_group_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+  appointment_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("appointments.id", ondelete="CASCADE"),
+    nullable=False,
+    index=True,
+  )
+  version_number = Column(Integer, nullable=False)
+  document_type = Column(
+    Enum(AppointmentDocumentType, native_enum=False, length=32),
+    nullable=False,
+  )
+  storage_key = Column(String(500), nullable=False, unique=True)
+  original_filename = Column(String(255), nullable=False)
+  mime_type = Column(String(100), nullable=False)
+  size_bytes = Column(BigInteger, nullable=False)
+  uploaded_by_user_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("users.id"),
+    nullable=False,
+    index=True,
+  )
+  uploaded_at = Column(
+    DateTime(timezone=True),
+    nullable=False,
+    default=lambda: datetime.now(timezone.utc),
+  )
+  is_current = Column(Boolean, nullable=False, default=True, index=True)
+  visible_to_citizen = Column(Boolean, nullable=False, default=False)
+  replaced_version_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("appointment_documents.id"),
+    nullable=True,
+  )
+
+  appointment = relationship("Appointment", back_populates="documents")
+  uploaded_by = relationship("User", foreign_keys=[uploaded_by_user_id])
+  replaced_version = relationship(
+    "AppointmentDocument",
+    remote_side=[id],
+    foreign_keys=[replaced_version_id],
+    uselist=False,
   )
 
 

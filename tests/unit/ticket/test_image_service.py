@@ -61,6 +61,7 @@ async def test_upload_records_validated_image_event_and_projection(
   citizen = _citizen()
   ticket = _ticket(citizen, TicketWorkflowState.NEW)
   db = AsyncMock()
+  db.info = {}
   db.flush = AsyncMock()
   upload = object()
   event = TicketEvent(
@@ -81,6 +82,10 @@ async def test_upload_records_validated_image_event_and_projection(
   monkeypatch.setattr(
     "src.ticket.repositories.image.TicketImageRepository.get_images",
     AsyncMock(return_value=[]),
+  )
+  monkeypatch.setattr(
+    "src.ticket.services.images.LocalImageStorage.resolve_file",
+    lambda *args, **kwargs: __import__("pathlib").Path("/tmp/ticket-image-test.jpg"),
   )
   monkeypatch.setattr(
     "src.ticket.services.images.LocalImageStorage.save_upload",

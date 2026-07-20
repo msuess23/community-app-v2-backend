@@ -17,3 +17,12 @@ def test_appointment_patch_one_routes_are_documented() -> None:
   assert "/api/v1/appointments/{appointment_id}/complete" in paths
   assert "/api/v1/appointments/{appointment_id}/no-show" in paths
   assert "/api/v1/appointments/{appointment_id}/events" in paths
+  assert "/api/v1/appointments/{appointment_id}/documents" in paths
+  assert (
+    "/api/v1/appointments/{appointment_id}/documents/"
+    "{document_group_id}/versions"
+  ) in paths
+  assert (
+    "/api/v1/appointments/{appointment_id}/documents/"
+    "{document_version_id}/content"
+  ) in paths

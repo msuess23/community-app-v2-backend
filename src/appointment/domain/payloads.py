@@ -8,7 +8,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, TypeAdapter
 
-from src.appointment.domain.enums import AppointmentEventType
+from src.appointment.domain.enums import (
+  AppointmentDocumentType,
+  AppointmentEventType,
+)
 from src.core.validation import NormalizedOptionalText, NormalizedRequiredText
 
 
@@ -61,8 +64,11 @@ class DocumentVersionAddedPayload(BaseModel):
   document_group_id: UUID
   document_version_id: UUID
   version_number: int = Field(ge=1)
-  document_type: str = Field(min_length=1, max_length=64)
+  document_type: AppointmentDocumentType
+  storage_key: str = Field(min_length=1, max_length=500)
   original_filename: str = Field(min_length=1, max_length=255)
+  mime_type: str = Field(min_length=1, max_length=100)
+  size_bytes: int = Field(ge=1)
   visible_to_citizen: bool
   replaced_version_id: UUID | None = None
 

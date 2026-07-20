@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
   )
 
+  # Versioned appointment PDF storage
+  APPOINTMENT_DOCUMENT_ROOT: str = "./data/appointment-documents"
+  APPOINTMENT_DOCUMENT_MAX_BYTES: int = Field(default=10 * 1024 * 1024, ge=1)
+
   # Database atomic variables
   POSTGRES_USER: str = Field(min_length=1)
   POSTGRES_PASSWORD: str = Field(min_length=1)
