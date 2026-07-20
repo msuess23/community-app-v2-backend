@@ -5,6 +5,7 @@ from typing import Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.appointment.lifecycle_guard import AppointmentLifecycleGuard
 from src.auth.repository import AuthRepository
 from src.core.exceptions import (
   ConflictException,
@@ -142,6 +143,11 @@ class UserService:
           user.id,
           operation="reassigned",
         )
+        if user.role == Role.CITIZEN and resulting_role != Role.CITIZEN:
+          await AppointmentLifecycleGuard.ensure_user_has_no_scheduled_appointments(
+            db,
+            user.id,
+          )
     else:
       update_dict = update_data.model_dump(exclude_unset=True)
       change_reason = "Profile updated by user"
@@ -261,6 +267,11 @@ class UserService:
       user.id,
       operation="deactivated",
     )
+    if user.role == Role.CITIZEN:
+      await AppointmentLifecycleGuard.ensure_user_has_no_scheduled_appointments(
+        db,
+        user.id,
+      )
 
     user.is_active = False
     user.deactivated_at = datetime.now(timezone.utc)

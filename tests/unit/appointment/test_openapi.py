@@ -1,4 +1,4 @@
-"""OpenAPI coverage for the first appointment API increment."""
+"""OpenAPI coverage for the appointment lifecycle API."""
 
 from src.main import app
 
@@ -12,3 +12,8 @@ def test_appointment_patch_one_routes_are_documented() -> None:
   assert "/api/v1/appointments/mine" in paths
   assert "/api/v1/appointments/internal" in paths
   assert "/api/v1/appointments/{appointment_id}" in paths
+  assert "/api/v1/appointments/{appointment_id}/reschedule" in paths
+  assert "/api/v1/appointments/{appointment_id}/cancel" in paths
+  assert "/api/v1/appointments/{appointment_id}/complete" in paths
+  assert "/api/v1/appointments/{appointment_id}/no-show" in paths
+  assert "/api/v1/appointments/{appointment_id}/events" in paths

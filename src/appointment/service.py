@@ -1,4 +1,4 @@
-"""Application services for appointment slots and initial bookings."""
+"""Booking and query service for event-sourced appointments."""
 
 from __future__ import annotations
 
@@ -9,19 +9,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.appointment.access_policy import AppointmentAccessPolicy
 from src.appointment.domain import (
+  AppointmentAction,
   AppointmentBookedPayload,
-  AppointmentSlotSortField,
   AppointmentSlotStatus,
   AppointmentSortField,
   AppointmentStatus,
 )
 from src.appointment.event_store import AppointmentEventStore
-from src.appointment.models import Appointment, AppointmentSlot
-from src.appointment.repository import AppointmentRepository, AppointmentSlotRepository
+from src.appointment.models import Appointment, AppointmentEvent
+from src.appointment.repository import (
+  AppointmentEventRepository,
+  AppointmentRepository,
+  AppointmentSlotRepository,
+)
 from src.appointment.schemas import (
   AppointmentBookRequest,
+  AppointmentEventResponse,
   AppointmentResponse,
-  AppointmentSlotBatchCreate,
 )
 from src.core.exceptions import (
   ConflictException,
@@ -37,159 +41,38 @@ from src.ticket.repositories.ticket import TicketProjectionRepository
 from src.user.models import Role, User
 
 
-class AppointmentSlotService:
-  """Manage office slot capacity without introducing event sourcing."""
-
-  @staticmethod
-  async def list_slots(
-    db: AsyncSession,
-    *,
-    office_id: uuid.UUID,
-    current_user: User | None,
-    page: int,
-    size: int,
-    status: AppointmentSlotStatus | None,
-    starts_from: datetime | None,
-    starts_to: datetime | None,
-    sort_by: AppointmentSlotSortField,
-    order: SortOrder,
-  ) -> PaginatedResponse:
-    """List public availability or the complete office-owned slot view."""
-
-    office = await OfficeRepository.get_by_id(db, office_id)
-    if office is None or not office.is_active:
-      raise ResourceNotFoundException(
-        "Office not found",
-        error_code="OFFICE_NOT_FOUND",
-      )
-
-    can_manage = (
-      current_user is not None
-      and AppointmentAccessPolicy.can_manage_office(office_id, current_user)
-    )
-    if status not in {None, AppointmentSlotStatus.AVAILABLE} and not can_manage:
-      raise ForbiddenException("Only office case workers may inspect unavailable slots")
-
-    slots, total = await AppointmentSlotRepository.get_page(
-      db,
-      office_id=office_id,
-      page=page,
-      size=size,
-      status=status,
-      starts_from=starts_from,
-      starts_to=starts_to,
-      public_only=not can_manage,
-      sort_by=sort_by,
-      order=order,
-    )
-    return PaginatedResponse.create(data=slots, total=total, page=page, size=size)
-
-  @staticmethod
-  async def create_slots(
-    db: AsyncSession,
-    *,
-    office_id: uuid.UUID,
-    request: AppointmentSlotBatchCreate,
-    current_user: User,
-  ) -> list[AppointmentSlot]:
-    """Create a non-overlapping slot batch while locking the owning office."""
-
-    office = await AppointmentSlotRepository.get_office_for_update(db, office_id)
-    if office is None:
-      raise ResourceNotFoundException(
-        "Office not found",
-        error_code="OFFICE_NOT_FOUND",
-      )
-    if not office.is_active:
-      raise DomainValidationException(
-        "Cannot create slots for an inactive office.",
-        error_code="OFFICE_INACTIVE",
-      )
-    if not AppointmentAccessPolicy.can_manage_office(office_id, current_user):
-      raise ForbiddenException()
-
-    now = datetime.now(timezone.utc)
-    ordered = sorted(request.slots, key=lambda slot: slot.starts_at)
-    for index, slot in enumerate(ordered):
-      if slot.starts_at <= now:
-        raise DomainValidationException(
-          "Appointment slots must start in the future.",
-          error_code="APPOINTMENT_SLOT_NOT_FUTURE",
-        )
-      if index and slot.starts_at < ordered[index - 1].ends_at:
-        raise DomainValidationException(
-          "The slot batch contains overlapping intervals.",
-          error_code="APPOINTMENT_SLOT_OVERLAP",
-        )
-      if await AppointmentSlotRepository.has_overlap(
-        db,
-        office_id=office_id,
-        starts_at=slot.starts_at,
-        ends_at=slot.ends_at,
-      ):
-        raise ConflictException(
-          "The appointment slot overlaps an existing slot.",
-          error_code="APPOINTMENT_SLOT_OVERLAP",
-        )
-
-    entities = [
-      AppointmentSlot(
-        id=uuid.uuid4(),
-        office_id=office_id,
-        starts_at=slot.starts_at,
-        ends_at=slot.ends_at,
-        status=AppointmentSlotStatus.AVAILABLE,
-        created_by_user_id=current_user.id,
-      )
-      for slot in ordered
-    ]
-    AppointmentSlotRepository.add_all(db, entities)
-    await db.flush()
-    return entities
-
-  @staticmethod
-  async def deactivate_slot(
-    db: AsyncSession,
-    *,
-    office_id: uuid.UUID,
-    slot_id: uuid.UUID,
-    current_user: User,
-  ) -> None:
-    """Deactivate one future free slot without deleting audit-relevant rows."""
-
-    slot = await AppointmentSlotRepository.get_by_id(db, slot_id, for_update=True)
-    if slot is None or slot.office_id != office_id:
-      raise ResourceNotFoundException(
-        "Appointment slot not found",
-        error_code="APPOINTMENT_SLOT_NOT_FOUND",
-      )
-    if not AppointmentAccessPolicy.can_manage_office(office_id, current_user):
-      raise ForbiddenException()
-    if slot.status != AppointmentSlotStatus.AVAILABLE:
-      raise ConflictException(
-        "Only available slots can be deactivated.",
-        error_code="APPOINTMENT_SLOT_NOT_AVAILABLE",
-      )
-    if slot.starts_at <= datetime.now(timezone.utc):
-      raise ConflictException(
-        "Past appointment slots cannot be deactivated.",
-        error_code="APPOINTMENT_SLOT_IN_PAST",
-      )
-
-    slot.status = AppointmentSlotStatus.INACTIVE
-    slot.updated_at = datetime.now(timezone.utc)
-    await db.flush()
-
-
 class AppointmentService:
   """Book and query event-sourced appointments."""
 
   @staticmethod
-  def to_response(appointment: Appointment) -> AppointmentResponse:
-    """Map one current projection to its API representation."""
+  def allowed_actions(
+    appointment: Appointment,
+    current_user: User,
+    *,
+    now: datetime | None = None,
+  ) -> list[AppointmentAction]:
+    """Return the lifecycle actions currently available to one user."""
 
-    # Lifecycle commands are introduced in Appointment Patch 2. Until then,
-    # the server deliberately advertises no post-booking mutations.
+    if appointment.status != AppointmentStatus.SCHEDULED:
+      return []
+    current_time = now or datetime.now(timezone.utc)
+    if appointment.starts_at > current_time:
+      if AppointmentAccessPolicy.can_change_schedule(appointment, current_user):
+        return [AppointmentAction.RESCHEDULE, AppointmentAction.CANCEL]
+      return []
+    if AppointmentAccessPolicy.can_record_outcome(appointment, current_user):
+      return [AppointmentAction.COMPLETE, AppointmentAction.MARK_NO_SHOW]
+    return []
+
+  @staticmethod
+  def to_response(
+    appointment: Appointment,
+    *,
+    current_user: User,
+    now: datetime | None = None,
+  ) -> AppointmentResponse:
+    """Map one current projection to its role-aware API representation."""
+
     return AppointmentResponse(
       id=appointment.id,
       current_slot_id=appointment.current_slot_id,
@@ -205,7 +88,11 @@ class AppointmentService:
       updated_at=appointment.updated_at,
       cancelled_at=appointment.cancelled_at,
       completed_at=appointment.completed_at,
-      allowed_actions=[],
+      allowed_actions=AppointmentService.allowed_actions(
+        appointment,
+        current_user,
+        now=now,
+      ),
     )
 
   @staticmethod
@@ -304,7 +191,10 @@ class AppointmentService:
     slot.status = AppointmentSlotStatus.BOOKED
     slot.updated_at = datetime.now(timezone.utc)
     await db.flush()
-    return AppointmentService.to_response(appointment)
+    return AppointmentService.to_response(
+      appointment,
+      current_user=current_user,
+    )
 
   @staticmethod
   async def list_mine(
@@ -337,7 +227,10 @@ class AppointmentService:
       order=order,
     )
     return PaginatedResponse.create(
-      data=[AppointmentService.to_response(item) for item in appointments],
+      data=[
+        AppointmentService.to_response(item, current_user=current_user)
+        for item in appointments
+      ],
       total=total,
       page=page,
       size=size,
@@ -392,7 +285,67 @@ class AppointmentService:
       order=order,
     )
     return PaginatedResponse.create(
-      data=[AppointmentService.to_response(item) for item in appointments],
+      data=[
+        AppointmentService.to_response(item, current_user=current_user)
+        for item in appointments
+      ],
+      total=total,
+      page=page,
+      size=size,
+    )
+
+  @staticmethod
+  def event_response(
+    event: AppointmentEvent,
+    *,
+    include_actor: bool,
+  ) -> AppointmentEventResponse:
+    """Map one event while hiding authority identifiers from citizens."""
+
+    return AppointmentEventResponse(
+      id=event.id,
+      sequence_number=event.sequence_number,
+      event_type=event.event_type,
+      actor_user_id=event.actor_user_id if include_actor else None,
+      occurred_at=event.occurred_at,
+      payload=dict(event.payload),
+    )
+
+  @staticmethod
+  async def get_events(
+    db: AsyncSession,
+    *,
+    appointment_id: uuid.UUID,
+    current_user: User,
+    page: int,
+    size: int,
+  ) -> PaginatedResponse[AppointmentEventResponse]:
+    """Return a chronological event page to the owner or responsible office."""
+
+    appointment = await AppointmentRepository.get_by_id(db, appointment_id)
+    if appointment is None or not AppointmentAccessPolicy.can_view(
+      appointment,
+      current_user,
+    ):
+      raise ResourceNotFoundException(
+        "Appointment not found",
+        error_code="APPOINTMENT_NOT_FOUND",
+      )
+    events, total = await AppointmentEventRepository.get_event_page(
+      db,
+      appointment_id,
+      page=page,
+      size=size,
+    )
+    include_actor = AppointmentAccessPolicy.can_manage_office(
+      appointment.office_id,
+      current_user,
+    )
+    return PaginatedResponse.create(
+      data=[
+        AppointmentService.event_response(event, include_actor=include_actor)
+        for event in events
+      ],
       total=total,
       page=page,
       size=size,
@@ -414,4 +367,7 @@ class AppointmentService:
       )
     if not AppointmentAccessPolicy.can_view(appointment, current_user):
       raise ForbiddenException()
-    return AppointmentService.to_response(appointment)
+    return AppointmentService.to_response(
+      appointment,
+      current_user=current_user,
+    )

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.appointment.lifecycle_guard import AppointmentLifecycleGuard
 from src.auth.repository import AuthRepository
 from src.core.exceptions import ConflictException, ForbiddenException
 from src.ticket.services.lifecycle_guard import TicketLifecycleGuard
@@ -69,6 +70,12 @@ async def test_citizen_deactivation_stores_final_anonymized_state(monkeypatch):
     "ensure_user_is_not_required",
     AsyncMock(),
   )
+  appointment_guard = AsyncMock()
+  monkeypatch.setattr(
+    AppointmentLifecycleGuard,
+    "ensure_user_has_no_scheduled_appointments",
+    appointment_guard,
+  )
   delete_sessions = AsyncMock()
   monkeypatch.setattr(
     AuthRepository,
@@ -91,6 +98,7 @@ async def test_citizen_deactivation_stores_final_anonymized_state(monkeypatch):
   assert citizen.is_active is False
   assert citizen.deactivated_at is not None
   delete_sessions.assert_awaited_once_with(db, citizen.id)
+  appointment_guard.assert_awaited_once_with(db, citizen.id)
 
 
 @pytest.mark.asyncio

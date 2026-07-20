@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.appointment.schemas import AppointmentSlotBatchCreate
-from src.appointment.service import AppointmentSlotService
+from src.appointment.slot_service import AppointmentSlotService
 from src.core.exceptions import DomainValidationException
 from src.office.models import Office
 from src.user.models import Role, User

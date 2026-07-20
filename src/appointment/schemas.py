@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.appointment.domain import (
   AppointmentAction,
+  AppointmentEventType,
   AppointmentSlotStatus,
   AppointmentStatus,
 )
 from src.core.request_models import StrictRequestModel
-from src.core.validation import NormalizedOptionalText
+from src.core.validation import NormalizedOptionalText, NormalizedRequiredText
 
 
 def _require_timezone(value: datetime) -> datetime:
@@ -68,6 +70,31 @@ class AppointmentBookRequest(StrictRequestModel):
   reason: NormalizedOptionalText = Field(None, max_length=1000)
 
 
+class AppointmentRescheduleRequest(StrictRequestModel):
+  """Move a scheduled appointment to another free slot of the same office."""
+
+  target_slot_id: UUID
+  reason: NormalizedRequiredText = Field(..., min_length=3, max_length=500)
+
+
+class AppointmentCancelRequest(StrictRequestModel):
+  """Cancel a future appointment and release its current slot."""
+
+  reason: NormalizedRequiredText = Field(..., min_length=3, max_length=500)
+
+
+class AppointmentCompleteRequest(StrictRequestModel):
+  """Record an optional authority note for a completed appointment."""
+
+  comment: NormalizedOptionalText = Field(None, max_length=1000)
+
+
+class AppointmentNoShowRequest(StrictRequestModel):
+  """Record an optional authority note for a citizen no-show."""
+
+  comment: NormalizedOptionalText = Field(None, max_length=1000)
+
+
 class AppointmentResponse(BaseModel):
   """Current appointment projection returned to citizens and staff."""
 
@@ -86,3 +113,14 @@ class AppointmentResponse(BaseModel):
   cancelled_at: datetime | None = None
   completed_at: datetime | None = None
   allowed_actions: list[AppointmentAction] = Field(default_factory=list)
+
+
+class AppointmentEventResponse(BaseModel):
+  """One immutable appointment event visible to an authorized reader."""
+
+  id: UUID
+  sequence_number: int
+  event_type: AppointmentEventType
+  actor_user_id: UUID | None = None
+  occurred_at: datetime
+  payload: dict[str, Any]

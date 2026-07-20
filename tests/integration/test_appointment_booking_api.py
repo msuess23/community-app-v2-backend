@@ -224,3 +224,240 @@ async def test_slot_booking_is_concurrent_and_ticket_aware(monkeypatch) -> None:
   finally:
     async with engine.begin() as connection:
       await connection.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_appointment_lifecycle_and_reschedule_concurrency(monkeypatch) -> None:
+  """Exercise reschedule, cancel, completion, no-show and event replay via HTTP."""
+
+  if "test" not in settings.POSTGRES_DB.lower():
+    pytest.fail("PostgreSQL integration tests require a disposable test database")
+
+  monkeypatch.setattr(settings, "RUN_SEED_ON_STARTUP", False)
+  monkeypatch.setattr(settings, "ENABLE_SCHEDULER", False)
+
+  async with engine.begin() as connection:
+    await connection.run_sync(Base.metadata.drop_all)
+    await connection.run_sync(Base.metadata.create_all)
+
+  office_id = uuid.uuid4()
+  manager_id = uuid.uuid4()
+  citizen_one_id = uuid.uuid4()
+  citizen_two_id = uuid.uuid4()
+  now = datetime.now(timezone.utc)
+
+  try:
+    async with AsyncSessionLocal() as db:
+      db.add_all(
+        [
+          Office(
+            id=office_id,
+            name="Appointment Lifecycle Office",
+            services=[],
+            opening_hours={},
+            is_active=True,
+          ),
+          User(
+            id=manager_id,
+            email="lifecycle.manager@example.com",
+            hashed_password=get_password_hash("password123"),
+            first_name="Lifecycle",
+            last_name="Manager",
+            role=Role.MANAGER,
+            office_id=office_id,
+            is_active=True,
+          ),
+          User(
+            id=citizen_one_id,
+            email="lifecycle.citizen.one@example.com",
+            hashed_password=get_password_hash("password123"),
+            first_name="Lifecycle",
+            last_name="One",
+            role=Role.CITIZEN,
+            is_active=True,
+          ),
+          User(
+            id=citizen_two_id,
+            email="lifecycle.citizen.two@example.com",
+            hashed_password=get_password_hash("password123"),
+            first_name="Lifecycle",
+            last_name="Two",
+            role=Role.CITIZEN,
+            is_active=True,
+          ),
+        ]
+      )
+      await db.commit()
+
+    async with lifespan(app):
+      transport = httpx.ASGITransport(app=app)
+      async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+      ) as client:
+        manager_token = await _login(client, "lifecycle.manager@example.com")
+        citizen_one_token = await _login(
+          client,
+          "lifecycle.citizen.one@example.com",
+        )
+        citizen_two_token = await _login(
+          client,
+          "lifecycle.citizen.two@example.com",
+        )
+        tokens = {
+          citizen_one_id: citizen_one_token,
+          citizen_two_id: citizen_two_token,
+        }
+
+        base_start = now + timedelta(days=5)
+        created = await client.post(
+          f"/api/v1/offices/{office_id}/appointment-slots",
+          headers=_headers(manager_token),
+          json={
+            "slots": [
+              {
+                "starts_at": (base_start + timedelta(days=index)).isoformat(),
+                "ends_at": (
+                  base_start + timedelta(days=index, minutes=30)
+                ).isoformat(),
+              }
+              for index in range(5)
+            ]
+          },
+        )
+        assert created.status_code == 201
+        source_one, source_two, shared_target, completion_slot, no_show_slot = [
+          item["id"] for item in created.json()
+        ]
+
+        booking_one = await client.post(
+          f"/api/v1/appointment-slots/{source_one}/book",
+          headers=_headers(citizen_one_token),
+          json={"reason": "First source appointment"},
+        )
+        booking_two = await client.post(
+          f"/api/v1/appointment-slots/{source_two}/book",
+          headers=_headers(citizen_two_token),
+          json={"reason": "Second source appointment"},
+        )
+        assert booking_one.status_code == booking_two.status_code == 201
+
+        appointment_one = booking_one.json()
+        appointment_two = booking_two.json()
+        reschedule_one, reschedule_two = await asyncio.gather(
+          client.post(
+            f"/api/v1/appointments/{appointment_one['id']}/reschedule",
+            headers=_headers(citizen_one_token),
+            json={
+              "target_slot_id": shared_target,
+              "reason": "Move to the shared target",
+            },
+          ),
+          client.post(
+            f"/api/v1/appointments/{appointment_two['id']}/reschedule",
+            headers=_headers(citizen_two_token),
+            json={
+              "target_slot_id": shared_target,
+              "reason": "Move to the shared target",
+            },
+          ),
+        )
+        assert sorted([reschedule_one.status_code, reschedule_two.status_code]) == [
+          200,
+          409,
+        ]
+
+        successful = (
+          reschedule_one if reschedule_one.status_code == 200 else reschedule_two
+        ).json()
+        winner_id = uuid.UUID(successful["citizen_id"])
+        cancelled = await client.post(
+          f"/api/v1/appointments/{successful['id']}/cancel",
+          headers=_headers(tokens[winner_id]),
+          json={"reason": "The appointment is no longer needed"},
+        )
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "CANCELLED"
+        assert cancelled.json()["current_slot_id"] is None
+        assert cancelled.json()["version"] == 3
+
+        losing_appointment = (
+          appointment_two if winner_id == citizen_one_id else appointment_one
+        )
+        losing_token = (
+          citizen_two_token if winner_id == citizen_one_id else citizen_one_token
+        )
+        retry = await client.post(
+          f"/api/v1/appointments/{losing_appointment['id']}/reschedule",
+          headers=_headers(losing_token),
+          json={
+            "target_slot_id": shared_target,
+            "reason": "Use the slot released by cancellation",
+          },
+        )
+        assert retry.status_code == 200
+        assert retry.json()["current_slot_id"] == shared_target
+        assert retry.json()["version"] == 2
+
+        completion_booking = await client.post(
+          f"/api/v1/appointment-slots/{completion_slot}/book",
+          headers=_headers(citizen_one_token),
+          json={"reason": "Appointment to complete"},
+        )
+        no_show_booking = await client.post(
+          f"/api/v1/appointment-slots/{no_show_slot}/book",
+          headers=_headers(citizen_two_token),
+          json={"reason": "Appointment to mark as no-show"},
+        )
+        assert completion_booking.status_code == no_show_booking.status_code == 201
+
+        frozen_now = base_start + timedelta(days=5, minutes=1)
+
+        class FrozenDateTime(datetime):
+          @classmethod
+          def now(cls, tz=None):
+            return frozen_now if tz is None else frozen_now.astimezone(tz)
+
+        monkeypatch.setattr(
+          "src.appointment.lifecycle_service.datetime",
+          FrozenDateTime,
+        )
+
+        completed = await client.post(
+          f"/api/v1/appointments/{completion_booking.json()['id']}/complete",
+          headers=_headers(manager_token),
+          json={"comment": "Citizen request processed"},
+        )
+        no_show = await client.post(
+          f"/api/v1/appointments/{no_show_booking.json()['id']}/no-show",
+          headers=_headers(manager_token),
+          json={"comment": "Citizen did not attend"},
+        )
+        assert completed.status_code == 200
+        assert completed.json()["status"] == "COMPLETED"
+        assert completed.json()["version"] == 2
+        assert no_show.status_code == 200
+        assert no_show.json()["status"] == "NO_SHOW"
+
+        citizen_events = await client.get(
+          f"/api/v1/appointments/{completion_booking.json()['id']}/events",
+          headers=_headers(citizen_one_token),
+        )
+        manager_events = await client.get(
+          f"/api/v1/appointments/{completion_booking.json()['id']}/events",
+          headers=_headers(manager_token),
+        )
+        assert citizen_events.status_code == manager_events.status_code == 200
+        assert citizen_events.json()["total"] == 2
+        assert citizen_events.json()["data"][1]["actor_user_id"] is None
+        assert manager_events.json()["data"][1]["actor_user_id"] == str(manager_id)
+
+    async with AsyncSessionLocal() as db:
+      completed_id = uuid.UUID(completion_booking.json()["id"])
+      appointment = await AppointmentRepository.get_by_id(db, completed_id)
+      assert appointment is not None
+      rebuilt = await AppointmentEventStore.rebuild(db, completed_id)
+      assert rebuilt == AppointmentEventStore.state_from_appointment(appointment)
+  finally:
+    async with engine.begin() as connection:
+      await connection.run_sync(Base.metadata.drop_all)

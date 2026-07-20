@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from src.appointment.models import Appointment
-from src.user.models import User
+from src.user.models import Role, User
 from src.user.roles import CASE_WORKER_ROLES
 
 
@@ -21,11 +21,37 @@ class AppointmentAccessPolicy:
     )
 
   @staticmethod
+  def is_owner(appointment: Appointment, current_user: User) -> bool:
+    """Return whether the authenticated citizen owns the appointment."""
+
+    return (
+      current_user.is_active
+      and current_user.role == Role.CITIZEN
+      and current_user.id == appointment.citizen_id
+    )
+
+  @staticmethod
   def can_view(appointment: Appointment, current_user: User) -> bool:
     """Return whether a user may see one appointment projection."""
 
-    if current_user.id == appointment.citizen_id:
-      return True
+    return AppointmentAccessPolicy.is_owner(
+      appointment,
+      current_user,
+    ) or AppointmentAccessPolicy.can_manage_office(
+      appointment.office_id,
+      current_user,
+    )
+
+  @staticmethod
+  def can_change_schedule(appointment: Appointment, current_user: User) -> bool:
+    """Allow owners and responsible office case workers to change a schedule."""
+
+    return AppointmentAccessPolicy.can_view(appointment, current_user)
+
+  @staticmethod
+  def can_record_outcome(appointment: Appointment, current_user: User) -> bool:
+    """Allow only the responsible office to complete or mark a no-show."""
+
     return AppointmentAccessPolicy.can_manage_office(
       appointment.office_id,
       current_user,

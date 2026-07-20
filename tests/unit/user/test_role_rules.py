@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
+from src.appointment.lifecycle_guard import AppointmentLifecycleGuard
 from src.core.exceptions import (
   ConflictException,
   DomainValidationException,
@@ -89,6 +90,12 @@ async def test_admin_can_promote_citizen_to_officer_with_active_office(monkeypat
     "ensure_user_is_not_required",
     AsyncMock(),
   )
+  appointment_guard = AsyncMock()
+  monkeypatch.setattr(
+    AppointmentLifecycleGuard,
+    "ensure_user_has_no_scheduled_appointments",
+    appointment_guard,
+  )
 
   result = await UserService.update_user_profile(
     db,
@@ -106,6 +113,7 @@ async def test_admin_can_promote_citizen_to_officer_with_active_office(monkeypat
   assert len(histories) == 1
   assert histories[0].role == Role.OFFICER
   assert histories[0].office_id == office.id
+  appointment_guard.assert_awaited_once_with(db, citizen.id)
   assert histories[0].change_reason == "Employment as case officer"
 
 

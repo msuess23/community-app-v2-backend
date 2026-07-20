@@ -5,6 +5,7 @@ from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.address.service import AddressService
+from src.appointment.lifecycle_guard import AppointmentLifecycleGuard
 from src.address.snapshot import AddressSnapshot
 from src.core.exceptions import (
   ConflictException,
@@ -236,6 +237,10 @@ class OfficeService:
       )
 
     await TicketLifecycleGuard.ensure_office_has_no_active_tickets(db, office.id)
+    await AppointmentLifecycleGuard.ensure_office_has_no_appointment_commitments(
+      db,
+      office.id,
+    )
 
     office.is_active = False
     office.deactivated_at = datetime.now(timezone.utc)

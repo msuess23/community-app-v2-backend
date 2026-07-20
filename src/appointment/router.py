@@ -15,11 +15,18 @@ from src.appointment.domain import (
 )
 from src.appointment.schemas import (
   AppointmentBookRequest,
+  AppointmentCancelRequest,
+  AppointmentCompleteRequest,
+  AppointmentEventResponse,
+  AppointmentNoShowRequest,
+  AppointmentRescheduleRequest,
   AppointmentResponse,
   AppointmentSlotBatchCreate,
   AppointmentSlotResponse,
 )
-from src.appointment.service import AppointmentService, AppointmentSlotService
+from src.appointment.lifecycle_service import AppointmentLifecycleService
+from src.appointment.service import AppointmentService
+from src.appointment.slot_service import AppointmentSlotService
 from src.auth.dependencies import get_current_user, get_optional_current_user, role_required
 from src.core.database import get_db
 from src.core.filters import SortOrder
@@ -204,6 +211,112 @@ async def list_internal_appointments(
     size=page_params.size,
     sort_by=sort_by,
     order=order,
+  )
+
+
+@router.post(
+  "/appointments/{appointment_id}/reschedule",
+  response_model=AppointmentResponse,
+  tags=["Appointments"],
+)
+async def reschedule_appointment(
+  appointment_id: uuid.UUID,
+  request: AppointmentRescheduleRequest,
+  db: AsyncSession = Depends(get_db, scope="function"),
+  current_user: User = Depends(get_current_user),
+):
+  """Move an owned or office-managed appointment to another free slot."""
+
+  return await AppointmentLifecycleService.reschedule(
+    db,
+    appointment_id=appointment_id,
+    request=request,
+    current_user=current_user,
+  )
+
+
+@router.post(
+  "/appointments/{appointment_id}/cancel",
+  response_model=AppointmentResponse,
+  tags=["Appointments"],
+)
+async def cancel_appointment(
+  appointment_id: uuid.UUID,
+  request: AppointmentCancelRequest,
+  db: AsyncSession = Depends(get_db, scope="function"),
+  current_user: User = Depends(get_current_user),
+):
+  """Cancel an owned or office-managed future appointment."""
+
+  return await AppointmentLifecycleService.cancel(
+    db,
+    appointment_id=appointment_id,
+    request=request,
+    current_user=current_user,
+  )
+
+
+@router.post(
+  "/appointments/{appointment_id}/complete",
+  response_model=AppointmentResponse,
+  tags=["Appointments"],
+)
+async def complete_appointment(
+  appointment_id: uuid.UUID,
+  request: AppointmentCompleteRequest,
+  db: AsyncSession = Depends(get_db, scope="function"),
+  current_user: User = Depends(role_required(*CASE_WORKER_ROLES)),
+):
+  """Complete an appointment after its scheduled start."""
+
+  return await AppointmentLifecycleService.complete(
+    db,
+    appointment_id=appointment_id,
+    request=request,
+    current_user=current_user,
+  )
+
+
+@router.post(
+  "/appointments/{appointment_id}/no-show",
+  response_model=AppointmentResponse,
+  tags=["Appointments"],
+)
+async def mark_appointment_no_show(
+  appointment_id: uuid.UUID,
+  request: AppointmentNoShowRequest,
+  db: AsyncSession = Depends(get_db, scope="function"),
+  current_user: User = Depends(role_required(*CASE_WORKER_ROLES)),
+):
+  """Mark an appointment as a citizen no-show after its start."""
+
+  return await AppointmentLifecycleService.mark_no_show(
+    db,
+    appointment_id=appointment_id,
+    request=request,
+    current_user=current_user,
+  )
+
+
+@router.get(
+  "/appointments/{appointment_id}/events",
+  response_model=PaginatedResponse[AppointmentEventResponse],
+  tags=["Appointments"],
+)
+async def list_appointment_events(
+  appointment_id: uuid.UUID,
+  page_params: PageParams = Depends(get_page_params),
+  db: AsyncSession = Depends(get_db, scope="function"),
+  current_user: User = Depends(get_current_user),
+):
+  """Return a chronological appointment event page to an authorized reader."""
+
+  return await AppointmentService.get_events(
+    db,
+    appointment_id=appointment_id,
+    current_user=current_user,
+    page=page_params.page,
+    size=page_params.size,
   )
 
 

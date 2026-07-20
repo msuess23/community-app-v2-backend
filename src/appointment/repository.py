@@ -58,6 +58,22 @@ class AppointmentSlotRepository:
     return result.scalar_one_or_none()
 
   @staticmethod
+  async def get_many_for_update(
+    db: AsyncSession,
+    slot_ids: list[uuid.UUID],
+  ) -> dict[uuid.UUID, AppointmentSlot]:
+    """Lock several slots in stable UUID order to avoid lock inversion."""
+
+    ordered_ids = sorted(set(slot_ids), key=str)
+    result = await db.execute(
+      select(AppointmentSlot)
+      .where(AppointmentSlot.id.in_(ordered_ids))
+      .order_by(AppointmentSlot.id.asc())
+      .with_for_update()
+    )
+    return {slot.id: slot for slot in result.scalars().all()}
+
+  @staticmethod
   async def get_page(
     db: AsyncSession,
     *,
@@ -116,6 +132,24 @@ class AppointmentSlotRepository:
         ),
         AppointmentSlot.starts_at < ends_at,
         AppointmentSlot.ends_at > starts_at,
+      )
+      .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+  @staticmethod
+  async def has_future_available_slots(
+    db: AsyncSession,
+    office_id: uuid.UUID,
+  ) -> bool:
+    """Return whether an office still offers future bookable capacity."""
+
+    result = await db.execute(
+      select(AppointmentSlot.id)
+      .where(
+        AppointmentSlot.office_id == office_id,
+        AppointmentSlot.status == AppointmentSlotStatus.AVAILABLE,
+        AppointmentSlot.starts_at > datetime.now(timezone.utc),
       )
       .limit(1)
     )
@@ -254,6 +288,40 @@ class AppointmentRepository:
     )
 
   @staticmethod
+  async def has_scheduled_for_citizen(
+    db: AsyncSession,
+    citizen_id: uuid.UUID,
+  ) -> bool:
+    """Return whether a citizen owns at least one scheduled appointment."""
+
+    result = await db.execute(
+      select(Appointment.id)
+      .where(
+        Appointment.citizen_id == citizen_id,
+        Appointment.status == AppointmentStatus.SCHEDULED,
+      )
+      .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+  @staticmethod
+  async def has_scheduled_for_office(
+    db: AsyncSession,
+    office_id: uuid.UUID,
+  ) -> bool:
+    """Return whether an office owns at least one scheduled appointment."""
+
+    result = await db.execute(
+      select(Appointment.id)
+      .where(
+        Appointment.office_id == office_id,
+        Appointment.status == AppointmentStatus.SCHEDULED,
+      )
+      .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+  @staticmethod
   def add(db: AsyncSession, appointment: Appointment) -> None:
     """Stage one appointment projection."""
 
@@ -268,6 +336,29 @@ class AppointmentEventRepository:
     """Stage one immutable aggregate event."""
 
     db.add(event)
+
+  @staticmethod
+  async def get_event_page(
+    db: AsyncSession,
+    appointment_id: uuid.UUID,
+    *,
+    page: int,
+    size: int,
+  ) -> tuple[list[AppointmentEvent], int]:
+    """Return a chronological page from one appointment event stream."""
+
+    query = select(AppointmentEvent).where(
+      AppointmentEvent.appointment_id == appointment_id
+    )
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=AppointmentEvent.sequence_number,
+      order=SortOrder.ASC,
+      tie_breaker=AppointmentEvent.id,
+    )
 
   @staticmethod
   async def get_events(

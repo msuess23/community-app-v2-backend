@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.appointment.lifecycle_guard import AppointmentLifecycleGuard
 from src.core.exceptions import ConflictException
 from src.office.models import Office
 from src.office.repository import OfficeRepository
@@ -136,6 +137,48 @@ async def test_office_with_active_tickets_cannot_be_deactivated(monkeypatch):
     )
 
   assert error.value.error_code == "OFFICE_HAS_ACTIVE_TICKETS"
+  assert office.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_office_with_appointment_commitments_cannot_be_deactivated(monkeypatch):
+  office = make_office()
+  monkeypatch.setattr(
+    OfficeRepository,
+    "get_by_id",
+    AsyncMock(return_value=office),
+  )
+  monkeypatch.setattr(
+    UserRepository,
+    "has_active_users_for_office",
+    AsyncMock(return_value=False),
+  )
+  monkeypatch.setattr(
+    TicketLifecycleGuard,
+    "ensure_office_has_no_active_tickets",
+    AsyncMock(),
+  )
+  guard = AsyncMock(
+    side_effect=ConflictException(
+      "Office cannot be deactivated while appointment commitments exist.",
+      error_code="OFFICE_HAS_APPOINTMENT_COMMITMENTS",
+    )
+  )
+  monkeypatch.setattr(
+    AppointmentLifecycleGuard,
+    "ensure_office_has_no_appointment_commitments",
+    guard,
+  )
+
+  with pytest.raises(ConflictException) as error:
+    await OfficeService.deactivate_office(
+      make_db(),
+      office.id,
+      uuid.uuid4(),
+      "Office merger",
+    )
+
+  assert error.value.error_code == "OFFICE_HAS_APPOINTMENT_COMMITMENTS"
   assert office.is_active is True
 
 
