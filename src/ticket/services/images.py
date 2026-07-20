@@ -8,10 +8,8 @@ from pathlib import Path
 
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from src.core.config import settings
 from src.core.exceptions import (
-  ConflictException,
   ForbiddenException,
   ResourceNotFoundException,
 )
@@ -35,16 +33,15 @@ from src.ticket.domain import (
   TicketEventType,
   TicketImageAddedPayload,
   TicketImageRemovedPayload,
-  TicketWorkflowState,
 )
-from src.ticket.models import Ticket, TicketImage
+from src.ticket.models import TicketImage
 from src.ticket.repositories.image import TicketImageRepository
 from src.ticket.repositories.ticket import TicketProjectionRepository
 from src.ticket.schemas import TicketImageRemoveRequest, TicketImageResponse
 from src.ticket.services.access_policy import TicketAccessPolicy
 from src.ticket.services.event_store import TicketEventStore
 from src.ticket.services.loaders import require_ticket
-from src.user.models import Role, User
+from src.user.models import User
 from src.user.roles import CASE_WORKER_ROLES
 
 
@@ -98,34 +95,6 @@ class TicketImageService:
     )
 
   @staticmethod
-  async def _require_manage_permission(
-    db: AsyncSession,
-    ticket: Ticket,
-    current_user: User,
-  ) -> None:
-    """Apply the immutable-submission rule and staff workflow permissions."""
-
-    if current_user.role == Role.CITIZEN:
-      if current_user.id != ticket.creator_user_id:
-        raise ForbiddenException("Only the ticket creator may manage these images")
-      if ticket.workflow_state != TicketWorkflowState.NEW:
-        raise ConflictException(
-          "Ticket images can no longer be changed after processing has started.",
-          error_code="TICKET_ALREADY_IN_PROCESS",
-        )
-      return
-
-    if current_user.role not in CASE_WORKER_ROLES:
-      raise ForbiddenException("Only assigned authority staff may manage ticket images")
-    if ticket.workflow_state == TicketWorkflowState.COMPLETED:
-      raise ConflictException(
-        "Images cannot be changed after the ticket is completed.",
-        error_code="TICKET_COMPLETED",
-      )
-    if not TicketAccessPolicy.can_manage_images(ticket, current_user):
-      raise ForbiddenException("The user has no internal access to this ticket")
-
-  @staticmethod
   async def list_images(
     db: AsyncSession,
     ticket_id: uuid.UUID,
@@ -162,7 +131,7 @@ class TicketImageService:
     """Store a new immutable file and record its metadata in the event stream."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    await TicketImageService._require_manage_permission(db, ticket, current_user)
+    TicketAccessPolicy.require_manage_images(ticket, current_user)
 
     image_id = uuid.uuid4()
     storage_config = TicketImageService._storage_config()
@@ -238,7 +207,7 @@ class TicketImageService:
     """Change the cover projection while preserving the decision as an event."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    await TicketImageService._require_manage_permission(db, ticket, current_user)
+    TicketAccessPolicy.require_manage_images(ticket, current_user)
     images = await TicketImageRepository.get_images(
       db,
       ticket.id,
@@ -281,7 +250,7 @@ class TicketImageService:
     """Deactivate an image projection but intentionally retain its file."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    await TicketImageService._require_manage_permission(db, ticket, current_user)
+    TicketAccessPolicy.require_manage_images(ticket, current_user)
     images = await TicketImageRepository.get_images(
       db,
       ticket.id,

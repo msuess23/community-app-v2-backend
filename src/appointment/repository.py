@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import Any, ClassVar, Mapping
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
 from src.appointment.domain import (
   AppointmentEventType,
   AppointmentSlotSortField,
@@ -30,7 +30,9 @@ from src.office.models import Office
 class AppointmentSlotRepository:
   """Persist and query office capacity slots."""
 
-  SORT_COLUMNS = {
+  SORT_COLUMNS: ClassVar[
+    Mapping[AppointmentSlotSortField, InstrumentedAttribute[Any]]
+  ] = {
     AppointmentSlotSortField.STARTS_AT: AppointmentSlot.starts_at,
     AppointmentSlotSortField.CREATED_AT: AppointmentSlot.created_at,
     AppointmentSlotSortField.STATUS: AppointmentSlot.status,
@@ -171,7 +173,9 @@ class AppointmentSlotRepository:
 class AppointmentRepository:
   """Persist and query current appointment projections."""
 
-  SORT_COLUMNS = {
+  SORT_COLUMNS: ClassVar[
+    Mapping[AppointmentSortField, InstrumentedAttribute[Any]]
+  ] = {
     AppointmentSortField.STARTS_AT: Appointment.starts_at,
     AppointmentSortField.CREATED_AT: Appointment.created_at,
     AppointmentSortField.STATUS: Appointment.status,

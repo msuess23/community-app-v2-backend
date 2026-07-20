@@ -6,16 +6,16 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from src.address.service import AddressService
-from src.core.config import settings
 from src.core.exceptions import (
   DomainValidationException,
-  ForbiddenException,
   ResourceNotFoundException,
 )
 from src.core.filters import SortOrder
 from src.core.schemas import PaginatedResponse
+from src.info.access_policy import InfoAccessPolicy
+from src.info.mapper import InfoResponseMapper
+from src.info.media import register_info_file_deletions
 from src.info.models import (
   Info,
   InfoCategory,
@@ -33,42 +33,11 @@ from src.info.schemas import (
 )
 from src.office.models import Office
 from src.office.repository import OfficeRepository
-from src.user.models import Role, User
-from src.user.roles import CASE_WORKER_ROLES
+from src.user.models import User
 
 
 class InfoService:
   """Manage Infos as ordinary mutable rows with a physical DELETE."""
-
-  @staticmethod
-  def _status_response(entry: InfoStatusEntry) -> InfoStatusResponse:
-    return InfoStatusResponse.model_validate(entry)
-
-  @staticmethod
-  def _response(info: Info, current_status: InfoStatusEntry) -> InfoResponse:
-    cover = next(
-      (image for image in getattr(info, "images", []) if image.is_cover),
-      None,
-    )
-    image_url = (
-      f"{settings.BASE_URL}/infos/{info.id}/images/{cover.id}/content"
-      if cover is not None
-      else None
-    )
-    return InfoResponse(
-      id=info.id,
-      title=info.title,
-      description=info.description,
-      category=info.category,
-      office_id=info.office_id,
-      address=info.address,
-      created_at=info.created_at,
-      updated_at=info.updated_at,
-      starts_at=info.starts_at,
-      ends_at=info.ends_at,
-      current_status=InfoService._status_response(current_status),
-      image_url=image_url,
-    )
 
   @staticmethod
   def _validate_window(
@@ -119,34 +88,14 @@ class InfoService:
     return office
 
   @staticmethod
-  def _require_manage_permission(info: Info, current_user: User) -> None:
-    if current_user.role == Role.ADMIN:
-      return
-    if (
-      current_user.role not in CASE_WORKER_ROLES
-      or info.office_id is None
-      or current_user.office_id != info.office_id
-    ):
-      raise ForbiddenException()
-
-  @staticmethod
   async def _validate_create_office(
     db: AsyncSession,
     office_id: uuid.UUID | None,
     current_user: User,
   ) -> None:
-    if current_user.role == Role.ADMIN:
-      if office_id is not None:
-        await InfoService._require_active_office(db, office_id)
-      return
-
-    if current_user.role not in CASE_WORKER_ROLES:
-      raise ForbiddenException()
-    if office_id is None or office_id != current_user.office_id:
-      raise ForbiddenException(
-        "Case workers may create Infos only for their own office."
-      )
-    await InfoService._require_active_office(db, office_id)
+    InfoAccessPolicy.require_create_permission(office_id, current_user)
+    if office_id is not None:
+      await InfoService._require_active_office(db, office_id)
 
   @staticmethod
   async def list_infos(
@@ -184,7 +133,7 @@ class InfoService:
       [info.id for info in infos],
     )
     responses = [
-      InfoService._response(info, latest[info.id])
+      InfoResponseMapper.info_response(info, latest[info.id])
       for info in infos
       if info.id in latest
     ]
@@ -212,7 +161,7 @@ class InfoService:
         "Info status not found",
         error_code="INFO_STATUS_NOT_FOUND",
       )
-    return InfoService._response(info, current)
+    return InfoResponseMapper.info_response(info, current)
 
   @staticmethod
   async def create_info(
@@ -259,7 +208,7 @@ class InfoService:
     )
     InfoStatusRepository.add(db, initial_status)
     await db.flush()
-    return InfoService._response(info, initial_status)
+    return InfoResponseMapper.info_response(info, initial_status)
 
   @staticmethod
   async def update_info(
@@ -274,11 +223,14 @@ class InfoService:
         "Info not found",
         error_code="INFO_NOT_FOUND",
       )
-    InfoService._require_manage_permission(info, current_user)
+    InfoAccessPolicy.require_manage_permission(info, current_user)
 
     if "office_id" in request.model_fields_set:
-      if current_user.role != Role.ADMIN and request.office_id != info.office_id:
-        raise ForbiddenException("Only administrators may reassign an Info.")
+      InfoAccessPolicy.require_reassignment_permission(
+        info,
+        request.office_id,
+        current_user,
+      )
       if request.office_id is not None:
         await InfoService._require_active_office(db, request.office_id)
       info.office_id = request.office_id
@@ -306,7 +258,7 @@ class InfoService:
         "Info status not found",
         error_code="INFO_STATUS_NOT_FOUND",
       )
-    return InfoService._response(info, current)
+    return InfoResponseMapper.info_response(info, current)
 
   @staticmethod
   async def delete_info(
@@ -320,10 +272,8 @@ class InfoService:
         "Info not found",
         error_code="INFO_NOT_FOUND",
       )
-    InfoService._require_manage_permission(info, current_user)
-    from src.info.image_service import InfoImageService
-
-    InfoImageService.register_file_deletions(db, list(info.images))
+    InfoAccessPolicy.require_manage_permission(info, current_user)
+    register_info_file_deletions(db, list(info.images))
     await InfoRepository.delete(db, info)
     await db.flush()
 
@@ -338,7 +288,7 @@ class InfoService:
         error_code="INFO_NOT_FOUND",
       )
     entries = await InfoStatusRepository.get_history(db, info_id)
-    return [InfoService._status_response(entry) for entry in entries]
+    return [InfoResponseMapper.status_response(entry) for entry in entries]
 
   @staticmethod
   async def get_current_status(
@@ -351,7 +301,7 @@ class InfoService:
         error_code="INFO_NOT_FOUND",
       )
     entry = await InfoStatusRepository.get_latest(db, info_id)
-    return InfoService._status_response(entry) if entry is not None else None
+    return InfoResponseMapper.status_response(entry) if entry is not None else None
 
   @staticmethod
   async def add_status(
@@ -366,7 +316,7 @@ class InfoService:
         "Info not found",
         error_code="INFO_NOT_FOUND",
       )
-    InfoService._require_manage_permission(info, current_user)
+    InfoAccessPolicy.require_manage_permission(info, current_user)
 
     now = datetime.now(timezone.utc)
     entry = InfoStatusEntry(
@@ -381,4 +331,4 @@ class InfoService:
     info.updated_at = now
     InfoStatusRepository.add(db, entry)
     await db.flush()
-    return InfoService._status_response(entry)
+    return InfoResponseMapper.status_response(entry)

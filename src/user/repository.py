@@ -1,11 +1,11 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, ClassVar, Mapping
 
 from sqlalchemy import func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-
+from sqlalchemy.orm import InstrumentedAttribute
 from src.core.filters import (
   LifecycleStatusFilter,
   SortOrder,
@@ -19,7 +19,7 @@ from src.user.models import Role, User, UserHistory, UserSortField
 class UserRepository:
   """Data access layer for User and UserHistory entities."""
 
-  SORT_COLUMNS = {
+  SORT_COLUMNS: ClassVar[Mapping[UserSortField, InstrumentedAttribute[Any]]] = {
     UserSortField.CREATED_AT: User.created_at,
     UserSortField.EMAIL: User.email,
     UserSortField.FIRST_NAME: User.first_name,
@@ -28,7 +28,7 @@ class UserRepository:
   }
 
   @staticmethod
-  async def get_by_email(db: AsyncSession, email: str) -> Optional[User]:
+  async def get_by_email(db: AsyncSession, email: str) -> User | None:
     normalized_email = email.strip().lower()
     result = await db.execute(
       select(User).where(func.lower(User.email) == normalized_email)
@@ -36,7 +36,7 @@ class UserRepository:
     return result.scalar_one_or_none()
 
   @staticmethod
-  async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> Optional[User]:
+  async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
     result = await db.execute(select(User).where(User.id == user_id))
     return result.scalar_one_or_none()
 
@@ -46,12 +46,12 @@ class UserRepository:
     *,
     page: int,
     size: int,
-    office_id: Optional[uuid.UUID] = None,
-    role: Optional[Role] = None,
+    office_id: uuid.UUID | None = None,
+    role: Role | None = None,
     exclude_citizens: bool = False,
-    force_office_id: Optional[uuid.UUID] = None,
+    force_office_id: uuid.UUID | None = None,
     status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
-    search: Optional[str] = None,
+    search: str | None = None,
     sort_by: UserSortField = UserSortField.LAST_NAME,
     order: SortOrder = SortOrder.ASC,
   ) -> tuple[list[User], int]:
@@ -145,8 +145,8 @@ class UserRepository:
     *,
     page: int,
     size: int,
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
   ) -> tuple[list[UserHistory], int]:
     query = select(UserHistory).where(UserHistory.user_id == user_id)
 

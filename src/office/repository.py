@@ -1,12 +1,11 @@
 import uuid
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Any, ClassVar, Mapping
 
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
-
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
 from src.address.models import Address
 from src.core.filters import (
   LifecycleStatusFilter,
@@ -22,14 +21,14 @@ from src.office.models import Office, OfficeHistory, OfficeSortField
 class OfficeRepository:
   """Data access layer for Office and OfficeHistory entities."""
 
-  SORT_COLUMNS = {
+  SORT_COLUMNS: ClassVar[Mapping[OfficeSortField, InstrumentedAttribute[Any]]] = {
     OfficeSortField.CREATED_AT: Office.created_at,
     OfficeSortField.NAME: Office.name,
     OfficeSortField.CONTACT_EMAIL: Office.contact_email,
   }
 
   @staticmethod
-  async def get_by_id(db: AsyncSession, office_id: uuid.UUID) -> Optional[Office]:
+  async def get_by_id(db: AsyncSession, office_id: uuid.UUID) -> Office | None:
     result = await db.execute(
       select(Office)
       .options(selectinload(Office.address))
@@ -38,7 +37,7 @@ class OfficeRepository:
     return result.scalar_one_or_none()
 
   @staticmethod
-  async def get_by_name(db: AsyncSession, name: str) -> Optional[Office]:
+  async def get_by_name(db: AsyncSession, name: str) -> Office | None:
     """Returns the first match; office names are intentionally not unique."""
     result = await db.execute(
       select(Office)
@@ -56,8 +55,8 @@ class OfficeRepository:
     page: int,
     size: int,
     status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
-    search: Optional[str] = None,
-    bbox: Optional[Tuple[float, float, float, float]] = None,
+    search: str | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
     sort_by: OfficeSortField = OfficeSortField.NAME,
     order: SortOrder = SortOrder.ASC,
   ) -> tuple[list[Office], int]:
@@ -101,8 +100,8 @@ class OfficeRepository:
     *,
     page: int,
     size: int,
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
   ) -> tuple[list[OfficeHistory], int]:
     query = select(OfficeHistory).where(OfficeHistory.office_id == office_id)
 

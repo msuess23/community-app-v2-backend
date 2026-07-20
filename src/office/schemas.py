@@ -1,10 +1,9 @@
 import re
 from datetime import datetime, time
-from typing import Optional
+from itertools import pairwise
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
-
 from src.address.schemas import AddressCreate, AddressResponse, AddressUpdate
 from src.address.snapshot import AddressSnapshot
 from src.core.request_models import StrictRequestModel
@@ -17,11 +16,10 @@ from src.core.validation import (
   normalize_required_text,
 )
 
-
 _OPENING_INTERVAL = re.compile(r"^(\d{2}):(\d{2})-(\d{2}):(\d{2})$")
 
 
-def _normalize_opening_hours(value: Optional[str]) -> Optional[str]:
+def _normalize_opening_hours(value: str | None) -> str | None:
   if value is None:
     return None
 
@@ -48,7 +46,7 @@ def _normalize_opening_hours(value: Optional[str]) -> Optional[str]:
     intervals.append((start, end, interval))
 
   intervals.sort(key=lambda item: item[0])
-  for previous, current in zip(intervals, intervals[1:]):
+  for previous, current in pairwise(intervals):
     if previous[1] > current[0]:
       raise ValueError("opening-hours intervals must not overlap")
 
@@ -56,31 +54,31 @@ def _normalize_opening_hours(value: Optional[str]) -> Optional[str]:
 
 
 class OpeningHours(StrictRequestModel):
-  monday: Optional[str] = None
-  tuesday: Optional[str] = None
-  wednesday: Optional[str] = None
-  thursday: Optional[str] = None
-  friday: Optional[str] = None
-  saturday: Optional[str] = None
-  sunday: Optional[str] = None
+  monday: str | None = None
+  tuesday: str | None = None
+  wednesday: str | None = None
+  thursday: str | None = None
+  friday: str | None = None
+  saturday: str | None = None
+  sunday: str | None = None
 
   @field_validator("*")
   @classmethod
-  def validate_day(cls, value: Optional[str]) -> Optional[str]:
+  def validate_day(cls, value: str | None) -> str | None:
     return _normalize_opening_hours(value)
 
 
 class OfficeBase(StrictRequestModel):
   name: NormalizedRequiredText = Field(..., min_length=3, max_length=150)
   description: NormalizedOptionalText = Field(None, max_length=1000)
-  contact_email: Optional[EmailStr] = None
+  contact_email: EmailStr | None = None
   phone: NormalizedOptionalText = Field(
     None,
     max_length=50,
     pattern=r"^\+?[0-9\s\-\(\)]+$",
   )
   services: list[str] = Field(default_factory=list, max_length=50)
-  opening_hours: Optional[OpeningHours] = None
+  opening_hours: OpeningHours | None = None
 
   @field_validator("services")
   @classmethod
@@ -99,7 +97,7 @@ class OfficeBase(StrictRequestModel):
 
 
 class OfficeCreate(OfficeBase):
-  address: Optional[AddressCreate] = None
+  address: AddressCreate | None = None
 
 
 class OfficeUpdate(StrictRequestModel):
@@ -109,15 +107,15 @@ class OfficeUpdate(StrictRequestModel):
     max_length=150,
   )
   description: NormalizedOptionalText = Field(None, max_length=1000)
-  contact_email: Optional[EmailStr] = None
+  contact_email: EmailStr | None = None
   phone: NormalizedOptionalText = Field(
     None,
     max_length=50,
     pattern=r"^\+?[0-9\s\-\(\)]+$",
   )
-  services: Optional[list[str]] = Field(None, max_length=50)
-  opening_hours: Optional[OpeningHours] = None
-  address: Optional[AddressUpdate] = None
+  services: list[str] | None = Field(None, max_length=50)
+  opening_hours: OpeningHours | None = None
+  address: AddressUpdate | None = None
   change_reason: ChangeReason
 
   @field_validator("services", mode="before")
@@ -129,7 +127,7 @@ class OfficeUpdate(StrictRequestModel):
 
   @field_validator("services")
   @classmethod
-  def normalize_services(cls, values: Optional[list[str]]) -> Optional[list[str]]:
+  def normalize_services(cls, values: list[str] | None) -> list[str] | None:
     return OfficeBase.normalize_services(values) if values is not None else None
 
 
@@ -140,12 +138,12 @@ class OfficeDeactivateRequest(StrictRequestModel):
 class OfficeResponse(BaseMetadataResponse):
   id: UUID
   name: str
-  description: Optional[str] = None
-  contact_email: Optional[str] = None
-  phone: Optional[str] = None
+  description: str | None = None
+  contact_email: str | None = None
+  phone: str | None = None
   services: list[str]
-  opening_hours: Optional[OpeningHours] = None
-  address: Optional[AddressResponse] = None
+  opening_hours: OpeningHours | None = None
+  address: AddressResponse | None = None
 
   model_config = ConfigDict(from_attributes=True)
 
@@ -154,12 +152,12 @@ class OfficeHistoryResponse(BaseModel):
   id: UUID
   office_id: UUID
   name: str
-  description: Optional[str] = None
-  contact_email: Optional[str] = None
-  phone: Optional[str] = None
+  description: str | None = None
+  contact_email: str | None = None
+  phone: str | None = None
   services: list[str] = Field(default_factory=list)
   opening_hours: dict = Field(default_factory=dict)
-  address_snapshot: Optional[AddressSnapshot] = None
+  address_snapshot: AddressSnapshot | None = None
   is_active: bool
   changed_by_user_id: UUID
   change_reason: str

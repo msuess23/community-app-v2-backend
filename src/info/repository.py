@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any, ClassVar, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
-
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
 from src.address.models import Address
 from src.core.filters import SortOrder, apply_bbox_filter, apply_search_filter
 from src.core.pagination import execute_page
@@ -25,7 +25,7 @@ from src.info.models import (
 class InfoRepository:
   """Queries and persistence operations for mutable Info entities."""
 
-  SORT_COLUMNS = {
+  SORT_COLUMNS: ClassVar[Mapping[InfoSortField, InstrumentedAttribute[Any]]] = {
     InfoSortField.STARTS_AT: Info.starts_at,
     InfoSortField.ENDS_AT: Info.ends_at,
     InfoSortField.CREATED_AT: Info.created_at,

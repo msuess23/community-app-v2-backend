@@ -3,10 +3,9 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from src.address.models import Address
 from src.core.exceptions import ForbiddenException
-from src.info.image_service import InfoImageService
+from src.info.mapper import InfoResponseMapper
 from src.info.models import Info, InfoCategory, InfoImage, InfoStatus, InfoStatusEntry
 from src.info.repository import InfoRepository, InfoStatusRepository
 from src.info.schemas import (
@@ -91,8 +90,8 @@ async def test_officer_can_create_only_for_own_active_office(monkeypatch) -> Non
     lambda _db, entry: staged_statuses.append(entry),
   )
   monkeypatch.setattr(
-    InfoService,
-    "_response",
+    InfoResponseMapper,
+    "info_response",
     staticmethod(lambda info, status: (info, status)),
   )
   starts_at = datetime.now(timezone.utc) + timedelta(days=1)
@@ -175,8 +174,8 @@ async def test_admin_updates_same_row_and_can_remove_owned_address(monkeypatch) 
     AsyncMock(return_value=current),
   )
   monkeypatch.setattr(
-    InfoService,
-    "_response",
+    InfoResponseMapper,
+    "info_response",
     staticmethod(lambda updated, status: (updated, status)),
   )
   original_id = info.id
@@ -229,8 +228,7 @@ async def test_delete_is_a_physical_repository_delete(monkeypatch) -> None:
   register_files = MagicMock()
   monkeypatch.setattr(InfoRepository, "delete", delete)
   monkeypatch.setattr(
-    InfoImageService,
-    "register_file_deletions",
+    "src.info.service.register_info_file_deletions",
     register_files,
   )
   db = _db()
@@ -294,7 +292,7 @@ def test_info_response_exposes_current_cover_content_url() -> None:
   )
   info.images = [cover]
 
-  response = InfoService._response(info, _status(info, manager))
+  response = InfoResponseMapper.info_response(info, _status(info, manager))
 
   assert response.image_url == (
     f"/api/v1/infos/{info.id}/images/{cover.id}/content"

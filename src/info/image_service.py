@@ -8,72 +8,29 @@ from pathlib import Path
 
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.core.config import settings
 from src.core.exceptions import ResourceNotFoundException
-from src.core.transaction_files import (
-  register_commit_file_delete,
-  register_rollback_file,
-  unregister_rollback_file,
+from src.core.transaction_files import register_rollback_file, unregister_rollback_file
+from src.info.access_policy import InfoAccessPolicy
+from src.info.mapper import InfoResponseMapper
+from src.info.media import (
+  info_image_storage_config,
+  register_info_file_deletions,
 )
 from src.info.models import Info, InfoImage
 from src.info.repository import InfoImageRepository, InfoRepository
 from src.info.schemas import InfoImageResponse
-from src.info.service import InfoService
 from src.media.cover import (
   new_image_should_be_cover,
   plan_cover_after_removal,
   plan_cover_selection,
 )
 from src.media.cover_persistence import apply_cover_change_safely
-from src.media.storage import (
-  ImageStorageConfig,
-  ImageStorageErrorCodes,
-  LocalImageStorage,
-)
+from src.media.storage import LocalImageStorage
 from src.user.models import User
 
 
 class InfoImageService:
   """Manage current Info images without events, revisions or soft deletion."""
-
-  @staticmethod
-  def _storage_config() -> ImageStorageConfig:
-    return ImageStorageConfig(
-      root=settings.INFO_MEDIA_ROOT,
-      max_bytes=settings.INFO_IMAGE_MAX_BYTES,
-      allowed_mime_types=frozenset(settings.INFO_IMAGE_ALLOWED_MIME_TYPES),
-      fallback_filename="info-image",
-      subject="info",
-      errors=ImageStorageErrorCodes(
-        unsupported_type="UNSUPPORTED_INFO_IMAGE_TYPE",
-        too_large="INFO_IMAGE_TOO_LARGE",
-        empty="EMPTY_INFO_IMAGE",
-        invalid_content="INVALID_INFO_IMAGE_CONTENT",
-        type_mismatch="INFO_IMAGE_TYPE_MISMATCH",
-        invalid_dimensions="INVALID_INFO_IMAGE_DIMENSIONS",
-        file_not_found="INFO_IMAGE_FILE_NOT_FOUND",
-      ),
-    )
-
-  @staticmethod
-  def image_url(info_id: uuid.UUID, image_id: uuid.UUID) -> str:
-    return f"{settings.BASE_URL}/infos/{info_id}/images/{image_id}/content"
-
-  @staticmethod
-  def _response(image: InfoImage) -> InfoImageResponse:
-    return InfoImageResponse(
-      id=image.id,
-      info_id=image.info_id,
-      url=InfoImageService.image_url(image.info_id, image.id),
-      original_filename=image.original_filename,
-      mime_type=image.mime_type,
-      size_bytes=image.size_bytes,
-      width=image.width,
-      height=image.height,
-      uploaded_at=image.uploaded_at,
-      is_cover=image.is_cover,
-    )
 
   @staticmethod
   async def _require_info(
@@ -91,36 +48,13 @@ class InfoImageService:
     return info
 
   @staticmethod
-  def _existing_path(storage_key: str) -> Path | None:
-    try:
-      return LocalImageStorage.resolve_file(
-        storage_key,
-        config=InfoImageService._storage_config(),
-      )
-    except ResourceNotFoundException:
-      # Hard deletion may repair metadata whose physical file is already absent.
-      return None
-
-  @staticmethod
-  def register_file_deletions(
-    db: AsyncSession,
-    images: list[InfoImage],
-  ) -> None:
-    """Schedule owned files for removal only after the database commit succeeds."""
-
-    for image in images:
-      path = InfoImageService._existing_path(image.storage_key)
-      if path is not None:
-        register_commit_file_delete(db, path)
-
-  @staticmethod
   async def list_images(
     db: AsyncSession,
     info_id: uuid.UUID,
   ) -> list[InfoImageResponse]:
     await InfoImageService._require_info(db, info_id)
     images = await InfoImageRepository.get_images(db, info_id)
-    return [InfoImageService._response(image) for image in images]
+    return [InfoResponseMapper.image_response(image) for image in images]
 
   @staticmethod
   async def add_image(
@@ -130,10 +64,10 @@ class InfoImageService:
     current_user: User,
   ) -> InfoImageResponse:
     info = await InfoImageService._require_info(db, info_id, for_update=True)
-    InfoService._require_manage_permission(info, current_user)
+    InfoAccessPolicy.require_manage_permission(info, current_user)
 
     image_id = uuid.uuid4()
-    storage_config = InfoImageService._storage_config()
+    storage_config = info_image_storage_config()
     stored = await LocalImageStorage.save_upload(
       upload,
       owner_path=str(info.id),
@@ -173,7 +107,7 @@ class InfoImageService:
       unregister_rollback_file(db, stored_path)
       raise
 
-    return InfoImageService._response(image)
+    return InfoResponseMapper.image_response(image)
 
   @staticmethod
   async def set_cover(
@@ -183,7 +117,7 @@ class InfoImageService:
     current_user: User,
   ) -> InfoImageResponse:
     info = await InfoImageService._require_info(db, info_id, for_update=True)
-    InfoService._require_manage_permission(info, current_user)
+    InfoAccessPolicy.require_manage_permission(info, current_user)
     images = await InfoImageRepository.get_images(
       db,
       info.id,
@@ -199,7 +133,7 @@ class InfoImageService:
 
     selected = next(image for image in images if image.id == image_id)
     if not change.changed:
-      return InfoImageService._response(selected)
+      return InfoResponseMapper.image_response(selected)
 
     selected = await apply_cover_change_safely(
       db,
@@ -209,7 +143,7 @@ class InfoImageService:
     assert selected is not None
     info.updated_at = datetime.now(timezone.utc)
     await db.flush()
-    return InfoImageService._response(selected)
+    return InfoResponseMapper.image_response(selected)
 
   @staticmethod
   async def delete_image(
@@ -219,7 +153,7 @@ class InfoImageService:
     current_user: User,
   ) -> None:
     info = await InfoImageService._require_info(db, info_id, for_update=True)
-    InfoService._require_manage_permission(info, current_user)
+    InfoAccessPolicy.require_manage_permission(info, current_user)
     images = await InfoImageRepository.get_images(
       db,
       info.id,
@@ -235,9 +169,7 @@ class InfoImageService:
 
     image = next(item for item in images if item.id == image_id)
     await apply_cover_change_safely(db, images, change)
-    path = InfoImageService._existing_path(image.storage_key)
-    if path is not None:
-      register_commit_file_delete(db, path)
+    register_info_file_deletions(db, [image])
     await InfoImageRepository.delete(db, image)
     info.updated_at = datetime.now(timezone.utc)
     await db.flush()
@@ -261,6 +193,6 @@ class InfoImageService:
       )
     path = LocalImageStorage.resolve_file(
       image.storage_key,
-      config=InfoImageService._storage_config(),
+      config=info_image_storage_config(),
     )
     return path, image

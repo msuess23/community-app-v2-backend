@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Any, ClassVar, Mapping
 
 from sqlalchemy import exists, false, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
-
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
 from src.address.models import Address
 from src.core.filters import SortOrder, apply_bbox_filter, apply_search_filter
 from src.core.pagination import execute_page
@@ -28,7 +27,7 @@ from src.user.models import Role, User
 class TicketProjectionRepository:
   """Persists and queries the current ticket read model."""
 
-  SORT_COLUMNS = {
+  SORT_COLUMNS: ClassVar[Mapping[TicketSortField, InstrumentedAttribute[Any]]] = {
     TicketSortField.CREATED_AT: Ticket.created_at,
     TicketSortField.UPDATED_AT: Ticket.updated_at,
     TicketSortField.TITLE: Ticket.title,
@@ -118,7 +117,7 @@ class TicketProjectionRepository:
     status: TicketStatus | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
-    bbox: Optional[Tuple[float, float, float, float]] = None,
+    bbox: tuple[float, float, float, float] | None = None,
     search: str | None = None,
     sort_by: TicketSortField = TicketSortField.CREATED_AT,
     order: SortOrder = SortOrder.DESC,

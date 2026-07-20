@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.core.exceptions import ConflictException, ForbiddenException
 from src.ticket.domain import TicketVisibility, TicketWorkflowState
 from src.ticket.models import Ticket
 from src.user.models import Role, User
 from src.user.roles import CASE_WORKER_ROLES
-
 
 ROUTING_STATES = frozenset(
   {
@@ -104,6 +104,31 @@ class TicketAccessPolicy:
       can_comment=can_comment,
       can_view_internal=can_view_internal,
     )
+
+
+  @staticmethod
+  def require_manage_images(ticket: Ticket, current_user: User) -> None:
+    """Enforce citizen submission immutability and staff workflow access."""
+
+    if current_user.role == Role.CITIZEN:
+      if current_user.id != ticket.creator_user_id:
+        raise ForbiddenException("Only the ticket creator may manage these images")
+      if ticket.workflow_state != TicketWorkflowState.NEW:
+        raise ConflictException(
+          "Ticket images can no longer be changed after processing has started.",
+          error_code="TICKET_ALREADY_IN_PROCESS",
+        )
+      return
+
+    if current_user.role not in CASE_WORKER_ROLES:
+      raise ForbiddenException("Only assigned authority staff may manage ticket images")
+    if ticket.workflow_state == TicketWorkflowState.COMPLETED:
+      raise ConflictException(
+        "Images cannot be changed after the ticket is completed.",
+        error_code="TICKET_COMPLETED",
+      )
+    if not TicketAccessPolicy.can_manage_images(ticket, current_user):
+      raise ForbiddenException("The user has no internal access to this ticket")
 
   @staticmethod
   def can_manage_images(ticket: Ticket, current_user: User) -> bool:

@@ -1,7 +1,7 @@
 import uuid
+from typing import ClassVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from src.address.models import Address
 from src.address.repository import AddressRepository
 from src.address.schemas import AddressCreate, AddressUpdate
@@ -11,7 +11,9 @@ from src.core.exceptions import DomainValidationException, ResourceNotFoundExcep
 class AddressService:
   """Address helpers used inside another domain's transaction."""
 
-  REQUIRED_FIELDS = {"street", "house_number", "zip_code", "city"}
+  REQUIRED_FIELDS: ClassVar[frozenset[str]] = frozenset(
+    {"street", "house_number", "zip_code", "city"}
+  )
 
   @staticmethod
   def create_address_entity(address_data: AddressCreate) -> Address:

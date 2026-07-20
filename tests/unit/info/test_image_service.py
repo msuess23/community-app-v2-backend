@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-
 from src.core.transaction_files import cleanup_commit_file_deletes
 from src.info.image_service import InfoImageService
 from src.info.models import Info, InfoCategory, InfoImage, InfoStatus
@@ -154,9 +153,8 @@ async def test_deleting_cover_physically_removes_row_and_selects_replacement(
   delete = AsyncMock()
   monkeypatch.setattr(InfoImageRepository, "delete", delete)
   monkeypatch.setattr(
-    InfoImageService,
-    "_existing_path",
-    staticmethod(lambda _key: existing_file),
+    "src.info.media.resolve_existing_info_image_path",
+    lambda _key: existing_file,
   )
 
   await InfoImageService.delete_image(

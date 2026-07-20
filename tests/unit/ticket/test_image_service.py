@@ -2,11 +2,11 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-
 from src.core.exceptions import ConflictException
 from src.media.storage import StoredImage
 from src.ticket.domain import TicketCategory, TicketWorkflowState
 from src.ticket.models import Ticket
+from src.ticket.services.access_policy import TicketAccessPolicy
 from src.ticket.services.images import TicketImageService
 from src.user.models import Role, User
 
@@ -34,17 +34,12 @@ def _ticket(citizen: User, state: TicketWorkflowState) -> Ticket:
   )
 
 
-@pytest.mark.asyncio
-async def test_citizen_cannot_change_images_after_dispatch() -> None:
+def test_citizen_cannot_change_images_after_dispatch() -> None:
   citizen = _citizen()
   ticket = _ticket(citizen, TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT)
 
   with pytest.raises(ConflictException) as error:
-    await TicketImageService._require_manage_permission(
-      AsyncMock(),
-      ticket,
-      citizen,
-    )
+    TicketAccessPolicy.require_manage_images(ticket, citizen)
 
   assert error.value.error_code == "TICKET_ALREADY_IN_PROCESS"
 
