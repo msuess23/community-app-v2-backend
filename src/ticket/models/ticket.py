@@ -117,11 +117,12 @@ class Ticket(Base):
 
   creator = relationship("User", foreign_keys=[creator_user_id], lazy="selectin")
   office = relationship("Office", lazy="selectin")
+  # Response serialization must use explicit eager loading instead of implicit SQL.
   address = relationship(
     "Address",
     cascade="all, delete-orphan",
     single_parent=True,
-    lazy="selectin",
+    lazy="raise_on_sql",
   )
   primary_officer = relationship("User", foreign_keys=[primary_officer_id])
   current_assignee = relationship(
@@ -143,7 +144,7 @@ class Ticket(Base):
     back_populates="ticket",
     cascade="all, delete-orphan",
     order_by="TicketImage.uploaded_at",
-    lazy="selectin",
+    lazy="raise_on_sql",
   )
 
 

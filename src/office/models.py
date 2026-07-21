@@ -39,11 +39,12 @@ class Office(Base):
     unique=True,
   )
   # One-way ownership: Address has deliberately no office relationship.
+  # Response serialization must use explicit eager loading instead of implicit SQL.
   address = relationship(
     "Address",
     cascade="all, delete-orphan",
     single_parent=True,
-    lazy="selectin",
+    lazy="raise_on_sql",
   )
 
 

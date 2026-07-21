@@ -196,6 +196,7 @@ class InfoService:
       else None
     )
     now = datetime.now(timezone.utc)
+    # Initialize the image collection before synchronous response mapping.
     info = Info(
       id=uuid.uuid4(),
       title=request.title,
@@ -203,6 +204,7 @@ class InfoService:
       category=request.category,
       office_id=request.office_id,
       address=address,
+      images=[],
       current_status=InfoStatus.SCHEDULED,
       created_at=now,
       updated_at=now,

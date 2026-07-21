@@ -146,7 +146,7 @@ class OfficeService:
       change_reason="OFFICE_CREATED",
     )
     await db.flush()
-    await db.refresh(new_office)
+    await db.refresh(new_office, attribute_names=["address"])
     return new_office
 
   @staticmethod
@@ -218,7 +218,7 @@ class OfficeService:
       change_reason=update_data.change_reason,
     )
     await db.flush()
-    await db.refresh(office)
+    await db.refresh(office, attribute_names=["address"])
     return office
 
   @staticmethod

@@ -112,11 +112,12 @@ class Info(Base):
   ends_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
   office = relationship("Office", lazy="selectin")
+  # Response serialization must use explicit eager loading instead of implicit SQL.
   address = relationship(
     "Address",
     cascade="all, delete-orphan",
     single_parent=True,
-    lazy="selectin",
+    lazy="raise_on_sql",
   )
   status_entries = relationship(
     "InfoStatusEntry",
@@ -130,7 +131,7 @@ class Info(Base):
     cascade="all, delete-orphan",
     passive_deletes=True,
     order_by="InfoImage.uploaded_at, InfoImage.id",
-    lazy="selectin",
+    lazy="raise_on_sql",
   )
 
 

@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import inspect
+from sqlalchemy.orm.attributes import NO_VALUE
 
 from src.ticket.domain import (
   TicketCategory,
@@ -60,7 +62,12 @@ async def test_create_ticket_stages_projection_and_initial_event(monkeypatch) ->
   assert event.sequence_number == 1
   assert ticket.public_status == TicketStatus.OPEN
   assert "office_id" not in event.payload
+  assert inspect(ticket).attrs.address.loaded_value is not NO_VALUE
+  assert inspect(ticket).attrs.address.loaded_value is None
+  assert inspect(ticket).attrs.images.loaded_value is not NO_VALUE
+  assert list(inspect(ticket).attrs.images.loaded_value) == []
   assert response.office_id is None
+  assert response.image_url is None
   assert response.current_status is not None
   assert response.current_status.status == TicketStatus.OPEN
   db.flush.assert_awaited_once()

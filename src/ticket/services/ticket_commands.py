@@ -58,10 +58,19 @@ class TicketCommandService:
       occurred_at=occurred_at,
     )
 
-    ticket = Ticket(id=uuid.uuid4(), creator_user_id=current_user.id)
+    # Initialize response-facing relationships before the entity becomes persistent.
+    address = (
+      AddressService.create_address_entity(request.address)
+      if request.address is not None
+      else None
+    )
+    ticket = Ticket(
+      id=uuid.uuid4(),
+      creator_user_id=current_user.id,
+      address=address,
+      images=[],
+    )
     TicketEventStore.sync_projection(ticket, state)
-    if request.address is not None:
-      ticket.address = AddressService.create_address_entity(request.address)
 
     event = TicketEventStore.build_event(
       ticket_id=ticket.id,

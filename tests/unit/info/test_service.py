@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy import inspect
+from sqlalchemy.orm.attributes import NO_VALUE
 from src.address.models import Address
 from src.core.exceptions import ForbiddenException
 from src.info.mapper import InfoResponseMapper
@@ -110,6 +112,9 @@ async def test_officer_can_create_only_for_own_active_office(monkeypatch) -> Non
 
   assert staged_infos == [info]
   assert staged_statuses == [status]
+  assert inspect(info).attrs.address.loaded_value is not NO_VALUE
+  assert inspect(info).attrs.images.loaded_value is not NO_VALUE
+  assert list(inspect(info).attrs.images.loaded_value) == []
   assert info.current_status == InfoStatus.SCHEDULED
   assert status.message == "Created"
 
