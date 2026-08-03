@@ -95,7 +95,7 @@ async def update_office(
   db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(Role.ADMIN)),
 ):
-  """Update an office and record its previous state."""
+  """Update an office and record the resulting state snapshot."""
 
   target_office = await OfficeService.get_office_by_id(
     db,
@@ -138,7 +138,7 @@ async def get_office_history(
   db: AsyncSession = Depends(get_db, scope="function"),
   _current_user: User = Depends(role_required(Role.ADMIN)),
 ):
-  """Return the paginated audit history of an office."""
+  """Return paginated result-state snapshots for an office."""
 
   return await OfficeService.get_office_history(
     db,

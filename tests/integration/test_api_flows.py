@@ -203,7 +203,14 @@ async def test_auth_user_office_and_history_flow(monkeypatch):
         )
         assert deactivated_office.status_code == 204
 
-        public_offices = await client.get("/api/v1/offices?status=all")
+        rejected_public_filter = await client.get("/api/v1/offices?status=all")
+        assert rejected_public_filter.status_code == 422
+        assert (
+          rejected_public_filter.json()["error_code"]
+          == "LIFECYCLE_FILTER_NOT_ALLOWED"
+        )
+
+        public_offices = await client.get("/api/v1/offices")
         assert public_offices.status_code == 200
         assert all(item["id"] != office_id for item in public_offices.json()["data"])
 

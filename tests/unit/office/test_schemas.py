@@ -1,7 +1,15 @@
+from datetime import datetime, timezone
+from uuid import uuid4
+
 import pytest
 from pydantic import ValidationError
 
-from src.office.schemas import OfficeCreate, OfficeUpdate, OpeningHours
+from src.office.schemas import (
+  OfficeCreate,
+  OfficeHistoryResponse,
+  OfficeUpdate,
+  OpeningHours,
+)
 
 
 def test_office_strings_and_services_are_normalized():
@@ -47,3 +55,19 @@ def test_office_requests_reject_unknown_fields_and_null_required_updates():
   )
   assert update.description is None
   assert update.address is None
+
+
+def test_office_history_uses_typed_opening_hours():
+  history = OfficeHistoryResponse(
+    id=uuid4(),
+    office_id=uuid4(),
+    name="Testamt",
+    opening_hours={"monday": "08:00-12:00"},
+    is_active=True,
+    changed_by_user_id=uuid4(),
+    change_reason="Opening hours changed",
+    changed_at=datetime.now(timezone.utc),
+  )
+
+  assert isinstance(history.opening_hours, OpeningHours)
+  assert history.opening_hours.monday == "08:00-12:00"

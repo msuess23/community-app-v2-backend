@@ -40,6 +40,22 @@ async def test_non_admin_office_list_rejects_inactive_filter(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_anonymous_office_list_rejects_non_active_filter(monkeypatch):
+  get_page = AsyncMock(return_value=([], 0))
+  monkeypatch.setattr(OfficeRepository, "get_page", get_page)
+
+  with pytest.raises(DomainValidationException) as exc_info:
+    await OfficeService.get_all_offices(
+      MagicMock(),
+      current_user=None,
+      status=LifecycleStatusFilter.ALL,
+    )
+
+  assert exc_info.value.error_code == "LIFECYCLE_FILTER_NOT_ALLOWED"
+  get_page.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_admin_office_list_honors_status(monkeypatch):
   get_page = AsyncMock(return_value=([], 0))
   monkeypatch.setattr(OfficeRepository, "get_page", get_page)

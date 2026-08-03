@@ -180,7 +180,7 @@ class OfficeHistoryResponse(BaseModel):
   contact_email: str | None = None
   phone: str | None = None
   services: list[str] = Field(default_factory=list)
-  opening_hours: dict = Field(default_factory=dict)
+  opening_hours: OpeningHours = Field(default_factory=OpeningHours)
   address_snapshot: AddressSnapshot | None = None
   is_active: bool
   changed_by_user_id: UUID

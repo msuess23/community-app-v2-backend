@@ -156,7 +156,7 @@ class OfficeService:
     update_data: OfficeUpdate,
     admin_id: uuid.UUID,
   ) -> Office:
-    """Update an office and preserve its previous state in history."""
+    """Update an office and append its resulting state to history."""
 
     if not office.is_active:
       raise DomainValidationException(
