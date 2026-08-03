@@ -19,7 +19,7 @@ from src.core.query_params import (
 from src.core.schemas import PaginatedResponse
 from src.user.dependencies import get_target_user_if_allowed
 from src.user.models import Role, User, UserSortField
-from src.user.roles import AUTHORITY_ROLES
+from src.user.roles import USER_DIRECTORY_ROLES
 from src.user.schemas import (
   AdminUserUpdate,
   UserDeactivateRequest,
@@ -68,7 +68,7 @@ async def get_all_users(
   page_params: PageParams = Depends(get_page_params),
   search_params: SearchParams = Depends(get_search_params),
   db: AsyncSession = Depends(get_db, scope="function"),
-  current_user: User = Depends(role_required(*AUTHORITY_ROLES)),
+  current_user: User = Depends(role_required(*USER_DIRECTORY_ROLES)),
 ):
   """List users with role-scoped visibility and validated filters."""
 

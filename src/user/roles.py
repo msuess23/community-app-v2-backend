@@ -5,4 +5,5 @@ from src.user.models import Role
 
 CASE_WORKER_ROLES = frozenset({Role.OFFICER, Role.MANAGER})
 AUTHORITY_ROLES = frozenset({Role.DISPATCHER, Role.OFFICER, Role.MANAGER})
+USER_DIRECTORY_ROLES = frozenset({*AUTHORITY_ROLES, Role.ADMIN})
 OFFICE_REQUIRED_ROLES = frozenset({Role.OFFICER, Role.MANAGER})

@@ -91,6 +91,18 @@ async def test_auth_user_office_and_history_flow(monkeypatch):
         assert registered.status_code == 201
         citizen_id = registered.json()["id"]
 
+        listed_citizens = await client.get(
+          "/api/v1/users",
+          headers=admin_headers,
+          params={
+            "q": "citizen.integration@example.com",
+            "role": "CITIZEN",
+          },
+        )
+        assert listed_citizens.status_code == 200
+        assert listed_citizens.json()["total"] == 1
+        assert listed_citizens.json()["data"][0]["id"] == citizen_id
+
         citizen_login = await client.post(
           "/api/v1/auth/login",
           data={
