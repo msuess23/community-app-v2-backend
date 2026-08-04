@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Optional, Tuple
 
 from fastapi import Query
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.sql import Select
 
 from src.core.exceptions import DomainValidationException
@@ -92,13 +92,21 @@ def escape_like_pattern(value: str) -> str:
 
 
 def apply_search_filter(query: Select, search_term: Optional[str], *columns) -> Select:
-  """Apply escaped case-insensitive text search across selected columns."""
+  """Match every whitespace-separated term in any searchable column."""
 
   if not search_term or not search_term.strip():
     return query
 
-  term = f"%{escape_like_pattern(search_term.strip())}%"
-  return query.where(or_(*[column.ilike(term, escape="\\") for column in columns]))
+  terms = [
+    f"%{escape_like_pattern(token)}%"
+    for token in search_term.split()
+    if token
+  ]
+  predicates = [
+    or_(*[column.ilike(term, escape="\\") for column in columns])
+    for term in terms
+  ]
+  return query.where(and_(*predicates))
 
 
 def apply_lifecycle_filter(query: Select, model, status: LifecycleStatusFilter) -> Select:
