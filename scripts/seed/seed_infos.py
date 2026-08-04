@@ -48,13 +48,20 @@ async def _add_info_image(
   info: Info,
   actor: User,
   filename: str,
+  alt_text: str,
   rgb: tuple[int, int, int],
 ) -> InfoImageResponse:
   """Attach one generated PNG through the ordinary Info image service."""
 
   upload = image_upload(filename, rgb=rgb)
   try:
-    return await InfoImageService.add_image(db, info.id, upload, actor)
+    return await InfoImageService.add_image(
+      db,
+      info.id,
+      upload,
+      alt_text,
+      actor,
+    )
   finally:
     await upload.close()
 
@@ -145,6 +152,7 @@ async def run_info_seeder(db: AsyncSession, context: SeedContext) -> None:
       info=info,
       actor=manager1,
       filename="summer-festival-stage.png",
+      alt_text="Bühne und Sitzplätze des Sommerfests auf dem Rathausplatz",
       rgb=(239, 189, 83),
     )
     second = await _add_info_image(
@@ -152,6 +160,7 @@ async def run_info_seeder(db: AsyncSession, context: SeedContext) -> None:
       info=info,
       actor=manager1,
       filename="summer-festival-poster.png",
+      alt_text="Veranstaltungsplakat für das Sommerfest am Rathaus",
       rgb=(79, 134, 198),
     )
     await InfoImageService.set_cover(db, info.id, second.id, manager1)
@@ -199,6 +208,7 @@ async def run_info_seeder(db: AsyncSession, context: SeedContext) -> None:
       info=info,
       actor=manager1,
       filename="road-closure-map.png",
+      alt_text="Karte der Straßensperrung und Umleitung an der Parkstraße",
       rgb=(215, 92, 71),
     )
 
@@ -270,6 +280,7 @@ async def run_info_seeder(db: AsyncSession, context: SeedContext) -> None:
       info=info,
       actor=admin,
       filename="mobile-consultation.png",
+      alt_text="Mobile Beratungsstelle auf dem Marktplatz",
       rgb=(69, 160, 139),
     )
 

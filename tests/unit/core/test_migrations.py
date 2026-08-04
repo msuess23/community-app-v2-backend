@@ -38,5 +38,7 @@ def test_complete_alembic_upgrade_and_downgrade_sql_can_be_generated():
   downgrade_sql = _run_alembic("downgrade", "head:base", "--sql")
 
   assert "CREATE TABLE info_images" in upgrade_sql
+  assert "ADD COLUMN alt_text VARCHAR(500)" in upgrade_sql
+  assert "ck_info_images_alt_text_not_blank" in upgrade_sql
   assert "DROP TABLE alembic_version" in downgrade_sql
   assert "fk_offices_address_id_addresses" in downgrade_sql

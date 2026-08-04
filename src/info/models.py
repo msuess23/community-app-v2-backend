@@ -142,6 +142,10 @@ class InfoImage(ImageMetadataMixin, Base):
   __table_args__ = (
     CheckConstraint("size_bytes > 0", name="ck_info_images_positive_size"),
     CheckConstraint(
+      "length(btrim(alt_text)) > 0",
+      name="ck_info_images_alt_text_not_blank",
+    ),
+    CheckConstraint(
       "width IS NULL OR width > 0",
       name="ck_info_images_positive_width",
     ),
@@ -169,6 +173,7 @@ class InfoImage(ImageMetadataMixin, Base):
     nullable=False,
     index=True,
   )
+  alt_text = Column(String(500), nullable=False)
 
   info = relationship("Info", back_populates="images")
   uploaded_by = relationship("User", foreign_keys=[uploaded_by_user_id])

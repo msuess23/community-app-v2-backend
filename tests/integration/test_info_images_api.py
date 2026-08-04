@@ -112,17 +112,45 @@ async def test_info_images_cover_content_and_physical_deletion(
         assert created.status_code == 201
         info_id = created.json()["id"]
 
+        missing_alt_text = await client.post(
+          f"/api/v1/infos/{info_id}/images",
+          headers=_headers(token),
+          files={"file": ("missing.png", _png_bytes(10, 10), "image/png")},
+        )
+        blank_alt_text = await client.post(
+          f"/api/v1/infos/{info_id}/images",
+          headers=_headers(token),
+          data={"alt_text": "   "},
+          files={"file": ("blank.png", _png_bytes(10, 10), "image/png")},
+        )
+        oversized_alt_text = await client.post(
+          f"/api/v1/infos/{info_id}/images",
+          headers=_headers(token),
+          data={"alt_text": "x" * 501},
+          files={"file": ("oversized.png", _png_bytes(10, 10), "image/png")},
+        )
+        assert {
+          missing_alt_text.status_code,
+          blank_alt_text.status_code,
+          oversized_alt_text.status_code,
+        } == {422}
+        assert list(media_root.rglob("*.png")) == []
+
         first = await client.post(
           f"/api/v1/infos/{info_id}/images",
           headers=_headers(token),
+          data={"alt_text": "Bühne des öffentlichen Stadtfests"},
           files={"file": ("first.png", _png_bytes(20, 10), "image/png")},
         )
         second = await client.post(
           f"/api/v1/infos/{info_id}/images",
           headers=_headers(token),
+          data={"alt_text": "Lageplan des Veranstaltungsgeländes"},
           files={"file": ("second.png", _png_bytes(30, 15), "image/png")},
         )
         assert first.status_code == second.status_code == 201
+        assert first.json()["alt_text"] == "Bühne des öffentlichen Stadtfests"
+        assert second.json()["alt_text"] == "Lageplan des Veranstaltungsgeländes"
         assert first.json()["is_cover"] is True
         assert second.json()["is_cover"] is False
         assert len(list(media_root.rglob("*.png"))) == 2
@@ -137,6 +165,7 @@ async def test_info_images_cover_content_and_physical_deletion(
         )
         assert selected.status_code == 200
         assert selected.json()["is_cover"] is True
+        assert selected.json()["alt_text"] == "Lageplan des Veranstaltungsgeländes"
         assert (await client.get(f"/api/v1/infos/{info_id}")).json()[
           "image_url"
         ] == second.json()["url"]
@@ -157,6 +186,9 @@ async def test_info_images_cover_content_and_physical_deletion(
         assert len(remaining.json()) == 1
         assert remaining.json()[0]["id"] == first.json()["id"]
         assert remaining.json()[0]["is_cover"] is True
+        assert remaining.json()[0]["alt_text"] == (
+          "Bühne des öffentlichen Stadtfests"
+        )
 
         deleted_info = await client.delete(
           f"/api/v1/infos/{info_id}",

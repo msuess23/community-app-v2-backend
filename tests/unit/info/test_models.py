@@ -54,6 +54,11 @@ def test_info_images_are_current_crud_rows_with_cascade_delete() -> None:
   columns = set(InfoImage.__table__.c.keys())
   info_fk = next(iter(InfoImage.__table__.c.info_id.foreign_keys))
   index_names = {index.name for index in InfoImage.__table__.indexes}
+  check_names = {
+    constraint.name
+    for constraint in InfoImage.__table__.constraints
+    if isinstance(constraint, CheckConstraint)
+  }
 
   assert {
     "id",
@@ -61,8 +66,11 @@ def test_info_images_are_current_crud_rows_with_cascade_delete() -> None:
     "storage_key",
     "width",
     "height",
+    "alt_text",
     "is_cover",
   } <= columns
+  assert InfoImage.__table__.c.alt_text.nullable is False
+  assert "ck_info_images_alt_text_not_blank" in check_names
   assert "is_active" not in columns
   assert "removed_at" not in columns
   assert "version" not in columns

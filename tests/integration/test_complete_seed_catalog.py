@@ -64,6 +64,9 @@ async def _catalog_snapshot() -> dict[str, object]:
     info_statuses = set(
       (await db.execute(select(Info.current_status).distinct())).scalars().all()
     )
+    info_image_alt_texts = set(
+      (await db.execute(select(InfoImage.alt_text))).scalars().all()
+    )
     appointment_statuses = set(
       (await db.execute(select(Appointment.status).distinct())).scalars().all()
     )
@@ -76,6 +79,7 @@ async def _catalog_snapshot() -> dict[str, object]:
     return {
       **counts,
       "info_statuses": info_statuses,
+      "info_image_alt_texts": info_image_alt_texts,
       "appointment_statuses": appointment_statuses,
       "ticket_event_types": ticket_event_types,
       "appointment_event_types": appointment_event_types,
@@ -129,6 +133,8 @@ async def test_complete_seed_catalog_is_varied_and_idempotent(
     assert first["appointment_events"] >= 14
     assert first["ticket_images"] == 2
     assert first["info_images"] == 4
+    assert len(first["info_image_alt_texts"]) == 4
+    assert all(first["info_image_alt_texts"])
     assert first["appointment_documents"] == 4
     assert first["appointment_slots"] >= 9
     assert first["info_statuses"] == set(InfoStatus)

@@ -29,6 +29,7 @@ class InfoResponseMapper:
       size_bytes=image.size_bytes,
       width=image.width,
       height=image.height,
+      alt_text=image.alt_text,
       uploaded_at=image.uploaded_at,
       is_cover=image.is_cover,
     )

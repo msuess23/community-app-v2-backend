@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import UploadFile
+from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.exceptions import ResourceNotFoundException
 from src.core.transaction_files import register_rollback_file, unregister_rollback_file
@@ -18,7 +19,7 @@ from src.info.media import (
 )
 from src.info.models import Info, InfoImage
 from src.info.repository import InfoImageRepository, InfoRepository
-from src.info.schemas import InfoImageResponse
+from src.info.schemas import InfoImageAltText, InfoImageResponse
 from src.media.cover import (
   new_image_should_be_cover,
   plan_cover_after_removal,
@@ -27,6 +28,9 @@ from src.media.cover import (
 from src.media.cover_persistence import apply_cover_change_safely
 from src.media.storage import LocalImageStorage
 from src.user.models import User
+
+
+_ALT_TEXT_ADAPTER = TypeAdapter(InfoImageAltText)
 
 
 class InfoImageService:
@@ -65,10 +69,12 @@ class InfoImageService:
     db: AsyncSession,
     info_id: uuid.UUID,
     upload: UploadFile,
+    alt_text: str,
     current_user: User,
   ) -> InfoImageResponse:
     """Validate and persist a new image for a manageable Info notice."""
 
+    normalized_alt_text = _ALT_TEXT_ADAPTER.validate_python(alt_text)
     info = await InfoImageService._require_info(db, info_id, for_update=True)
     InfoAccessPolicy.require_manage_permission(info, current_user)
 
@@ -99,6 +105,7 @@ class InfoImageService:
       size_bytes=stored.size_bytes,
       width=stored.width,
       height=stored.height,
+      alt_text=normalized_alt_text,
       uploaded_by_user_id=current_user.id,
       uploaded_at=datetime.now(timezone.utc),
       is_cover=new_image_should_be_cover(images),

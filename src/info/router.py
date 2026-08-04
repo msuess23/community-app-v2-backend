@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Annotated, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from src.info.image_service import InfoImageService
 from src.info.models import InfoCategory, InfoSortField, InfoStatus
 from src.info.schemas import (
   InfoCreateRequest,
+  InfoImageAltText,
   InfoImageResponse,
   InfoResponse,
   InfoStatusCreateRequest,
@@ -175,7 +176,8 @@ async def list_info_images(
 )
 async def upload_info_image(
   info_id: uuid.UUID,
-  file: UploadFile = File(...),
+  file: Annotated[UploadFile, File()],
+  alt_text: Annotated[InfoImageAltText, Form()],
   db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(
     role_required(Role.OFFICER, Role.MANAGER, Role.ADMIN)
@@ -183,7 +185,13 @@ async def upload_info_image(
 ):
   """Upload one validated current image without creating a revision."""
 
-  return await InfoImageService.add_image(db, info_id, file, current_user)
+  return await InfoImageService.add_image(
+    db,
+    info_id,
+    file,
+    alt_text,
+    current_user,
+  )
 
 
 @router.put(

@@ -57,6 +57,7 @@ def _image(info, uploader, *, is_cover, suffix):
     size_bytes=100,
     width=20,
     height=10,
+    alt_text=f"Alternativtext für {suffix}",
     uploaded_by_user_id=uploader.id,
     uploaded_at=datetime.now(timezone.utc),
     is_cover=is_cover,
@@ -113,14 +114,17 @@ async def test_first_upload_becomes_cover_without_event_metadata(
     db,
     info.id,
     object(),
+    "  Straßensperrung   mit ausgeschilderter Umleitung  ",
     manager,
   )
 
   assert response.info_id == info.id
   assert response.is_cover is True
+  assert response.alt_text == "Straßensperrung mit ausgeschilderter Umleitung"
   assert response.url.endswith(f"/{response.id}/content")
   assert len(staged) == 1
   assert staged[0].is_cover is True
+  assert staged[0].alt_text == response.alt_text
   assert "added_event_id" not in InfoImage.__table__.c
   assert stored_path.resolve() in db.info["rollback_file_paths"]
 

@@ -1,6 +1,15 @@
 from src.main import app
 
 
+def _request_body_schema(spec: dict, path: str) -> dict:
+  schema = spec["paths"][path]["post"]["requestBody"]["content"][
+    "multipart/form-data"
+  ]["schema"]
+  if "$ref" in schema:
+    return spec["components"]["schemas"][schema["$ref"].split("/")[-1]]
+  return schema
+
+
 def test_info_crud_and_status_routes_are_documented() -> None:
   paths = app.openapi()["paths"]
 
@@ -65,7 +74,8 @@ def test_info_is_classical_crud_without_revision_schemas() -> None:
 
 
 def test_info_image_contract_reuses_current_media_metadata_without_revisions() -> None:
-  schemas = app.openapi()["components"]["schemas"]
+  spec = app.openapi()
+  schemas = spec["components"]["schemas"]
   fields = schemas["InfoImageResponse"]["properties"]
 
   assert {
@@ -77,10 +87,22 @@ def test_info_image_contract_reuses_current_media_metadata_without_revisions() -
     "size_bytes",
     "width",
     "height",
+    "alt_text",
     "uploaded_at",
     "is_cover",
   } <= set(fields)
   assert "is_active" not in fields
   assert "removed_at" not in fields
   assert "version" not in fields
-  assert not any(path.startswith("/api/media") for path in app.openapi()["paths"])
+  upload = _request_body_schema(spec, "/api/v1/infos/{info_id}/images")
+  assert {"file", "alt_text"} <= set(upload["required"])
+  assert upload["properties"]["alt_text"]["minLength"] == 1
+  assert upload["properties"]["alt_text"]["maxLength"] == 500
+
+  ticket_upload = _request_body_schema(
+    spec,
+    "/api/v1/tickets/{ticket_id}/images",
+  )
+  assert "alt_text" not in ticket_upload["properties"]
+  assert "alt_text" not in schemas["TicketImageResponse"]["properties"]
+  assert not any(path.startswith("/api/media") for path in spec["paths"])

@@ -57,6 +57,10 @@ Appointment document versions append `DOCUMENT_VERSION_ADDED` events without cha
 
 There is no content version table, soft delete, tombstone, or event-sourced projection for Info. Owned status rows, addresses, images, and files are removed with the Info according to their transaction and cascade rules.
 
+Info image uploads additionally require authored alternative text. This metadata
+is Info-specific because authority staff curate public notices; citizen-uploaded
+ticket images retain their separate contract without an accessibility field.
+
 ## Server-side input validation and error output
 
 - Pydantic request schemas enforce lengths, required fields, enum values, timezone awareness, interval ordering, and strict unknown-field rejection.

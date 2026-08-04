@@ -1,14 +1,28 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from src.info.models import InfoCategory, InfoStatus
 from src.info.schemas import (
   InfoCreateRequest,
+  InfoImageAltText,
   InfoStatusCreateRequest,
   InfoUpdateRequest,
 )
+
+
+def test_info_image_alt_text_is_required_normalized_and_bounded() -> None:
+  adapter = TypeAdapter(InfoImageAltText)
+
+  assert adapter.validate_python(
+    "  Karte   der Umleitung  an der Parkstraße  "
+  ) == "Karte der Umleitung an der Parkstraße"
+
+  with pytest.raises(ValidationError):
+    adapter.validate_python("   ")
+  with pytest.raises(ValidationError):
+    adapter.validate_python("x" * 501)
 
 
 def test_create_normalizes_text_and_retains_ktor_domain_values() -> None:

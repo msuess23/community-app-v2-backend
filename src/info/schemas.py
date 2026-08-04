@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -16,6 +17,13 @@ from src.core.validation import (
 )
 from src.info.models import InfoCategory, InfoStatus
 from src.media.schemas import ImageMetadataResponse
+
+
+INFO_IMAGE_ALT_TEXT_MAX_LENGTH = 500
+InfoImageAltText = Annotated[
+  NormalizedRequiredText,
+  Field(min_length=1, max_length=INFO_IMAGE_ALT_TEXT_MAX_LENGTH),
+]
 
 
 def _require_timezone(value: datetime) -> datetime:
@@ -116,6 +124,7 @@ class InfoImageResponse(ImageMetadataResponse):
   """Public metadata for one current image owned by an Info."""
 
   info_id: UUID
+  alt_text: str
 
 
 class InfoResponse(BaseModel):
