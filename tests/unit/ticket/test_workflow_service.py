@@ -67,7 +67,11 @@ def _ticket(
   )
 
 
-def _mock_writes(monkeypatch, events: list[TicketEvent]) -> None:
+def _mock_writes(monkeypatch, events: list[TicketEvent], ticket: Ticket) -> None:
+  monkeypatch.setattr(
+    "src.ticket.repositories.event.TicketEventRepository.get_last_sequence_number",
+    AsyncMock(side_effect=lambda *_args: ticket.version),
+  )
   monkeypatch.setattr(
     "src.ticket.repositories.ticket.TicketProjectionRepository.add",
     lambda _db, _ticket: None,
@@ -94,7 +98,7 @@ async def test_dispatch_moves_ticket_to_active_office(monkeypatch) -> None:
     "src.office.repository.OfficeRepository.get_by_id",
     AsyncMock(return_value=SimpleNamespace(id=office_id, is_active=True)),
   )
-  _mock_writes(monkeypatch, staged)
+  _mock_writes(monkeypatch, staged, ticket)
 
   response = await TicketWorkflowCommandService.dispatch_ticket(
     db,
@@ -128,7 +132,7 @@ async def test_manager_assigns_permanent_officer(monkeypatch) -> None:
     "src.user.repository.UserRepository.get_by_id",
     AsyncMock(return_value=officer),
   )
-  _mock_writes(monkeypatch, [])
+  _mock_writes(monkeypatch, [], ticket)
 
   response = await TicketWorkflowCommandService.assign_primary_officer(
     db,
@@ -184,7 +188,7 @@ async def test_manager_can_replace_primary_officer(monkeypatch) -> None:
     "src.user.repository.UserRepository.get_by_id",
     AsyncMock(return_value=replacement),
   )
-  _mock_writes(monkeypatch, staged)
+  _mock_writes(monkeypatch, staged, ticket)
 
   await TicketWorkflowCommandService.assign_primary_officer(
     db,

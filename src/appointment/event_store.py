@@ -15,7 +15,7 @@ from src.appointment.domain import (
 )
 from src.appointment.models import Appointment, AppointmentEvent
 from src.appointment.repository import AppointmentEventRepository, AppointmentRepository
-from src.core.exceptions import ResourceNotFoundException
+from src.core.exceptions import ConflictException, ResourceNotFoundException
 
 
 class AppointmentEventStore:
@@ -128,6 +128,16 @@ class AppointmentEventStore:
     occurred_at: datetime | None = None,
   ) -> AppointmentEvent:
     """Append a validated event and update the projection in one transaction."""
+
+    persisted_version = await AppointmentEventRepository.get_last_sequence_number(
+      db,
+      appointment.id,
+    )
+    if persisted_version != appointment.version:
+      raise ConflictException(
+        "The appointment projection is inconsistent with its event stream.",
+        error_code="APPOINTMENT_PROJECTION_VERSION_MISMATCH",
+      )
 
     event_time = occurred_at or datetime.now(timezone.utc)
     state = evolve_appointment(

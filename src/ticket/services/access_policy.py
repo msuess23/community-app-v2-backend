@@ -7,15 +7,9 @@ from dataclasses import dataclass
 from src.core.exceptions import ConflictException, ForbiddenException
 from src.ticket.domain import TicketVisibility, TicketWorkflowState
 from src.ticket.models import Ticket
+from src.ticket.services.workflow_policy import TicketWorkflowPolicy
 from src.user.models import Role, User
 from src.user.roles import CASE_WORKER_ROLES
-
-ROUTING_STATES = frozenset(
-  {
-    TicketWorkflowState.NEW,
-    TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
-  }
-)
 
 
 @dataclass(frozen=True)
@@ -33,22 +27,17 @@ class TicketAccessPolicy:
 
   @staticmethod
   def is_case_worker_participant(ticket: Ticket, current_user: User) -> bool:
-    """Return whether a case worker belongs to the ticket or its office."""
+    """Return whether a case worker is an explicit ticket participant."""
 
     if current_user.role not in CASE_WORKER_ROLES:
       return False
-    return (
-      current_user.id
-      in {
-        ticket.primary_officer_id,
-        ticket.current_assignee_id,
-        ticket.return_to_user_id,
-      }
-      or (
-        current_user.office_id is not None
-        and current_user.office_id == ticket.office_id
-      )
-    )
+    if current_user.role == Role.MANAGER and current_user.office_id == ticket.office_id:
+      return True
+    return current_user.id in {
+      ticket.primary_officer_id,
+      ticket.current_assignee_id,
+      ticket.return_to_user_id,
+    }
 
   @staticmethod
   def is_dispatcher_routing_ticket(ticket: Ticket, current_user: User) -> bool:
@@ -56,7 +45,7 @@ class TicketAccessPolicy:
 
     return (
       current_user.role == Role.DISPATCHER
-      and ticket.workflow_state in ROUTING_STATES
+      and ticket.workflow_state in TicketWorkflowPolicy.ROUTING_STATES
     )
 
   @staticmethod
@@ -104,7 +93,6 @@ class TicketAccessPolicy:
       can_comment=can_comment,
       can_view_internal=can_view_internal,
     )
-
 
   @staticmethod
   def require_manage_images(ticket: Ticket, current_user: User) -> None:

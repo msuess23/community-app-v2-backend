@@ -225,7 +225,7 @@ async def test_reassignment_redispatch_archive_refresh_rotation_and_logout_all(
         )
         assert returned.status_code == 200
         assert returned.json()["office_id"] is None
-        assert returned.json()["workflow_state"] == "NEW"
+        assert returned.json()["workflow_state"] == "RETURNED_TO_DISPATCH"
 
         dispatched_b = await client.post(
           f"/api/v1/tickets/{ticket_id}/dispatch",

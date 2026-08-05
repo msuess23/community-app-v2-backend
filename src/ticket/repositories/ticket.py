@@ -44,9 +44,14 @@ class TicketProjectionRepository:
   def _detail_query():
     """Build the eager-loading query shared by ticket detail reads."""
 
-    return select(Ticket).options(
+    return select(Ticket).execution_options(populate_existing=True).options(
       selectinload(Ticket.address),
       selectinload(Ticket.images),
+      selectinload(Ticket.creator),
+      selectinload(Ticket.office),
+      selectinload(Ticket.primary_officer),
+      selectinload(Ticket.current_assignee),
+      selectinload(Ticket.return_to_user),
     )
 
   @staticmethod
@@ -199,6 +204,7 @@ class TicketProjectionRepository:
       return Ticket.workflow_state.in_(
         {
           TicketWorkflowState.NEW,
+          TicketWorkflowState.RETURNED_TO_DISPATCH,
           TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
         }
       )

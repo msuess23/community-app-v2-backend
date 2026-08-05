@@ -17,10 +17,12 @@ Evidence:
   - request additional citizen input and return responsibility afterward,
   - return a wrongly assigned case to dispatch,
   - complete the ticket with a public outcome.
-- `src/ticket/services/workflow_queries.py` calculates actions allowed for the current state and actor.
+- `src/ticket/services/workflow_policy.py` is the shared source of truth for allowed actions, selectable targets, terminal outcomes, and command validation.
+- `GET /api/v1/tickets/{ticket_id}/workflow-options` exposes only options that are currently selectable for the actor and ticket.
+- `src/ticket/services/workflow_queries.py` returns actions and response-only user or office references without changing immutable events.
 - `scripts/seed/seed_tickets.py` creates different paths and path lengths instead of one fixed sequence.
 
-The next participant is selected by the acting user for forwarding, cosignature, escalation, and dispatch. This preserves the central characteristic of an ad-hoc workflow: the path between submission and completion is not a single predetermined chain.
+The next participant is selected by the acting user for forwarding, cosignature, escalation, and dispatch. This preserves the central characteristic of an ad-hoc workflow: the path between submission and completion is not a single predetermined chain. A dedicated `RETURNED_TO_DISPATCH` state distinguishes a case that has already entered processing from a new submission, so citizen edit and cancellation rights are not accidentally restored.
 
 ## Event sourcing for at least two entities
 
@@ -32,8 +34,10 @@ The next participant is selected by the acting user for forwarding, cosignature,
 - Event store and synchronous projection update: `src/ticket/services/event_store.py`
 - Deterministic replay: `rebuild_ticket()` and `TicketEventStore.rebuild()`
 - Current query model: `Ticket`
+- Projection/stream verification before every append
+- Database-level `RESTRICT` foreign keys and append-only triggers for event retention
 
-Ticket comments and ticket image changes are also represented as immutable ticket events.
+Ticket comments and ticket image changes are also represented as immutable ticket events. The mutable ticket row is treated as a synchronously maintained snapshot projection; the ordered event stream remains sufficient for deterministic replay.
 
 ### Appointments
 
@@ -43,6 +47,8 @@ Ticket comments and ticket image changes are also represented as immutable ticke
 - Event store and synchronous projection update: `src/appointment/event_store.py`
 - Deterministic replay: `rebuild_appointment()` and `AppointmentEventStore.rebuild()`
 - Current query model: `Appointment`
+- Projection/stream verification before every append
+- Database-level `RESTRICT` foreign keys and append-only triggers for event retention
 
 Appointment document versions append `DOCUMENT_VERSION_ADDED` events without changing scheduling state.
 

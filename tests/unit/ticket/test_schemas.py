@@ -17,6 +17,7 @@ from src.ticket.schemas import (
   DecideEscalationAction,
   RequestCosignatureAction,
   TicketInternalResponse,
+  UserReference,
   TicketResponse,
   TicketStatusResponse,
 )
@@ -30,6 +31,7 @@ def test_ticket_response_uses_plain_snake_case_fields() -> None:
     category=TicketCategory.INFRASTRUCTURE,
     visibility=TicketVisibility.PUBLIC,
     created_at=now,
+    updated_at=now,
     current_status=TicketStatusResponse(
       id=uuid4(),
       status=TicketStatus.OPEN,
@@ -45,6 +47,7 @@ def test_ticket_response_uses_plain_snake_case_fields() -> None:
   internal = TicketInternalResponse(
     **data,
     creator_user_id=uuid4(),
+    creator=UserReference(id=uuid4(), display_name="Test Citizen"),
     workflow_state="NEW",
   )
   assert "creator_user_id" in internal.model_dump()

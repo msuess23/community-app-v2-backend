@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, ClassVar, Mapping
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, selectinload
 from src.appointment.domain import (
@@ -348,6 +348,20 @@ class AppointmentEventRepository:
     """Stage one immutable aggregate event."""
 
     db.add(event)
+
+  @staticmethod
+  async def get_last_sequence_number(
+    db: AsyncSession,
+    appointment_id: uuid.UUID,
+  ) -> int:
+    """Return the persisted stream version for projection verification."""
+
+    result = await db.execute(
+      select(func.coalesce(func.max(AppointmentEvent.sequence_number), 0)).where(
+        AppointmentEvent.appointment_id == appointment_id
+      )
+    )
+    return int(result.scalar_one())
 
   @staticmethod
   async def get_event_page(

@@ -6,7 +6,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import ForbiddenException, WorkflowValidationException
+from src.core.exceptions import ForbiddenException
 from src.office.repository import OfficeRepository
 from src.ticket.domain import (
   CitizenRespondedPayload,
@@ -22,6 +22,7 @@ from src.ticket.domain import (
   TicketEventType,
   TicketForwardedPayload,
   TicketReturnedToDispatchPayload,
+  TicketWorkflowAction,
   TicketWorkflowState,
 )
 from src.ticket.models import Ticket, TicketEvent
@@ -39,44 +40,25 @@ from src.ticket.schemas import (
   TicketDispatchRequest,
   TicketWorkflowRequest,
 )
+from src.ticket.services.errors import (
+  TicketActionNotAllowedException,
+  TicketCompletionOutcomeNotAllowedException,
+  TicketSelfTargetException,
+  TicketTargetAlreadySelectedException,
+  TicketTargetNotEligibleException,
+  TicketTargetUnavailableException,
+)
 from src.ticket.services.event_store import TicketEventStore
 from src.ticket.services.loaders import require_ticket
+from src.ticket.services.workflow_policy import TicketWorkflowPolicy
 from src.user.models import Role, User
-from src.user.roles import CASE_WORKER_ROLES
 from src.user.repository import UserRepository
 
 
+async def _load_user(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+  """Load a workflow target without applying role-specific policy twice."""
 
-def _require_current_assignee(ticket: Ticket, current_user: User) -> None:
-  """Ensure the caller currently owns the main workflow responsibility."""
-
-  if current_user.role not in CASE_WORKER_ROLES or ticket.current_assignee_id != current_user.id:
-    raise WorkflowValidationException(
-      "Only the currently assigned employee may perform this action."
-    )
-
-
-def _require_active_processing(ticket: Ticket, message: str) -> None:
-  """Reject commands outside the normal active processing state."""
-
-  if ticket.workflow_state != TicketWorkflowState.IN_PROGRESS:
-    raise WorkflowValidationException(message)
-
-
-async def _require_active_staff(
-  db: AsyncSession,
-  user_id: uuid.UUID,
-  *,
-  roles: set[Role] | None = None,
-  error_message: str = "The selected employee is not active.",
-) -> User:
-  """Load an active authority employee matching optional role constraints."""
-
-  user = await UserRepository.get_by_id(db, user_id)
-  allowed_roles = roles or CASE_WORKER_ROLES
-  if user is None or not user.is_active or user.role not in allowed_roles:
-    raise WorkflowValidationException(error_message)
-  return user
+  return await UserRepository.get_by_id(db, user_id)
 
 
 class TicketWorkflowCommandService:
@@ -93,29 +75,23 @@ class TicketWorkflowCommandService:
 
     if current_user.role != Role.DISPATCHER:
       raise ForbiddenException("Only dispatchers may route tickets")
-
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    if ticket.primary_officer_id is not None or ticket.workflow_state not in {
-      TicketWorkflowState.NEW,
-      TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
-    }:
-      raise WorkflowValidationException(
-        "Only tickets without a primary officer may be dispatched."
-      )
-
+    TicketWorkflowPolicy.require_action(
+      ticket,
+      current_user,
+      TicketWorkflowAction.DISPATCH,
+    )
     office = await OfficeRepository.get_by_id(db, request.office_id)
-    if office is None or not office.is_active:
-      raise WorkflowValidationException("The selected office is not active.")
+    if not TicketWorkflowPolicy.office_is_eligible(office):
+      raise TicketTargetUnavailableException("The selected office is no longer available.")
+    assert office is not None
 
     await TicketEventStore.append(
       db,
       ticket,
       actor_user_id=current_user.id,
       event_type=TicketEventType.TICKET_DISPATCHED,
-      payload=TicketDispatchedPayload(
-        office_id=office.id,
-        comment=request.comment,
-      ),
+      payload=TicketDispatchedPayload(office_id=office.id, comment=request.comment),
     )
     return ticket
 
@@ -130,43 +106,32 @@ class TicketWorkflowCommandService:
 
     if current_user.role != Role.MANAGER:
       raise ForbiddenException("Only managers may assign a primary officer")
-
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    if ticket.office_id is None or ticket.workflow_state == TicketWorkflowState.COMPLETED:
-      raise WorkflowValidationException(
-        "Only an active ticket assigned to an office may receive a primary officer."
-      )
-    if current_user.office_id != ticket.office_id:
-      raise ForbiddenException("Only a manager of the assigned office may act")
-
-    officer = await _require_active_staff(
-      db,
-      request.primary_officer_id,
-      roles={Role.OFFICER},
-      error_message=(
-        "The primary officer must be an active officer of the assigned office."
-      ),
+    action = (
+      TicketWorkflowAction.ASSIGN_PRIMARY_OFFICER
+      if ticket.primary_officer_id is None
+      else TicketWorkflowAction.REASSIGN_PRIMARY_OFFICER
     )
-    if officer.office_id != ticket.office_id:
-      raise WorkflowValidationException(
+    TicketWorkflowPolicy.require_action(ticket, current_user, action)
+    officer = await _load_user(db, request.primary_officer_id)
+    if officer is None or not officer.is_active:
+      raise TicketTargetUnavailableException()
+    if officer.id == ticket.primary_officer_id:
+      raise TicketTargetAlreadySelectedException(
+        "The selected officer is already the primary officer."
+      )
+    if not TicketWorkflowPolicy.primary_officer_is_eligible(ticket, officer):
+      raise TicketTargetNotEligibleException(
         "The primary officer must be an active officer of the assigned office."
       )
 
     if ticket.primary_officer_id is None:
-      if ticket.workflow_state != TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT:
-        raise WorkflowValidationException(
-          "The ticket is not waiting for its initial primary officer."
-        )
       event_type = TicketEventType.PRIMARY_OFFICER_ASSIGNED
       payload = PrimaryOfficerAssignedPayload(
         primary_officer_id=officer.id,
         comment=request.comment,
       )
     else:
-      if ticket.primary_officer_id == officer.id:
-        raise WorkflowValidationException(
-          "The selected officer is already the primary officer."
-        )
       event_type = TicketEventType.PRIMARY_OFFICER_REASSIGNED
       payload = PrimaryOfficerReassignedPayload(
         previous_primary_officer_id=ticket.primary_officer_id,
@@ -193,21 +158,20 @@ class TicketWorkflowCommandService:
     """Transfer coordination while retaining the permanent primary officer."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    _require_current_assignee(ticket, current_user)
-    _require_active_processing(ticket, "Only active tickets may be forwarded.")
-    target = await _require_active_staff(db, request.target_user_id)
-    if target.id == current_user.id:
-      raise WorkflowValidationException("A ticket cannot be forwarded to the same user.")
-
+    TicketWorkflowPolicy.require_action(ticket, current_user, request.action)
+    target = await _load_user(db, request.target_user_id)
+    target = TicketWorkflowPolicy.require_target(
+      target=target,
+      actor=current_user,
+      eligible=TicketWorkflowPolicy.processing_target_is_eligible(target),
+      role_message="Tickets may only be forwarded to active officers or managers.",
+    )
     await TicketEventStore.append(
       db,
       ticket,
       actor_user_id=current_user.id,
       event_type=TicketEventType.TICKET_FORWARDED,
-      payload=TicketForwardedPayload(
-        target_user_id=target.id,
-        comment=request.comment,
-      ),
+      payload=TicketForwardedPayload(target_user_id=target.id, comment=request.comment),
     )
     return ticket
 
@@ -221,12 +185,14 @@ class TicketWorkflowCommandService:
     """Send the ticket to one employee for an explicit cosignature."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    _require_current_assignee(ticket, current_user)
-    _require_active_processing(ticket, "Cosignatures require active processing.")
-    target = await _require_active_staff(db, request.target_user_id)
-    if target.id == current_user.id:
-      raise WorkflowValidationException("A user cannot request their own cosignature.")
-
+    TicketWorkflowPolicy.require_action(ticket, current_user, request.action)
+    target = await _load_user(db, request.target_user_id)
+    target = TicketWorkflowPolicy.require_target(
+      target=target,
+      actor=current_user,
+      eligible=TicketWorkflowPolicy.processing_target_is_eligible(target),
+      role_message="Cosignatures may only be requested from active officers or managers.",
+    )
     await TicketEventStore.append(
       db,
       ticket,
@@ -250,13 +216,11 @@ class TicketWorkflowCommandService:
     """Record the requested cosignature and return the case to its requester."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    if (
-      ticket.workflow_state != TicketWorkflowState.WAITING_FOR_COSIGNATURE
-      or ticket.current_assignee_id != current_user.id
-      or ticket.return_to_user_id is None
-    ):
-      raise WorkflowValidationException("This ticket is not awaiting your cosignature.")
-    return_to = await _require_active_staff(db, ticket.return_to_user_id)
+    TicketWorkflowPolicy.require_action(ticket, current_user, request.action)
+    assert ticket.return_to_user_id is not None
+    return_to = await _load_user(db, ticket.return_to_user_id)
+    if return_to is None or not TicketWorkflowPolicy.processing_target_is_eligible(return_to):
+      raise TicketTargetUnavailableException("The return target is no longer available.")
     await TicketEventStore.append(
       db,
       ticket,
@@ -279,17 +243,14 @@ class TicketWorkflowCommandService:
     """Temporarily transfer coordination to a manager for one decision."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    _require_current_assignee(ticket, current_user)
-    _require_active_processing(ticket, "Only active tickets may be escalated.")
-    manager = await _require_active_staff(
-      db,
-      request.manager_user_id,
-      roles={Role.MANAGER},
-      error_message="The escalation target must be an active manager.",
+    TicketWorkflowPolicy.require_action(ticket, current_user, request.action)
+    manager = await _load_user(db, request.manager_user_id)
+    manager = TicketWorkflowPolicy.require_target(
+      target=manager,
+      actor=current_user,
+      eligible=TicketWorkflowPolicy.escalation_target_is_eligible(manager),
+      role_message="The escalation target must be an active manager.",
     )
-    if manager.id == current_user.id:
-      raise WorkflowValidationException("A user cannot escalate a ticket to themselves.")
-
     await TicketEventStore.append(
       db,
       ticket,
@@ -313,16 +274,11 @@ class TicketWorkflowCommandService:
     """Apply one management decision and return the ticket to its requester."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    if current_user.role != Role.MANAGER:
-      raise ForbiddenException("Only managers may decide escalations")
-    if (
-      ticket.workflow_state != TicketWorkflowState.WAITING_FOR_DECISION
-      or ticket.current_assignee_id != current_user.id
-      or ticket.return_to_user_id is None
-    ):
-      raise WorkflowValidationException("This ticket has no escalation for this manager.")
-    return_to = await _require_active_staff(db, ticket.return_to_user_id)
-
+    TicketWorkflowPolicy.require_action(ticket, current_user, request.action)
+    assert ticket.return_to_user_id is not None
+    return_to = await _load_user(db, ticket.return_to_user_id)
+    if return_to is None or not TicketWorkflowPolicy.processing_target_is_eligible(return_to):
+      raise TicketTargetUnavailableException("The return target is no longer available.")
     await TicketEventStore.append(
       db,
       ticket,
@@ -346,8 +302,7 @@ class TicketWorkflowCommandService:
     """Pause authority processing until the citizen supplies missing details."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    _require_current_assignee(ticket, current_user)
-    _require_active_processing(ticket, "Citizen input requires active processing.")
+    TicketWorkflowPolicy.require_action(ticket, current_user, request.action)
     await TicketEventStore.append(
       db,
       ticket,
@@ -377,8 +332,12 @@ class TicketWorkflowCommandService:
       or ticket.current_assignee_id != current_user.id
       or ticket.return_to_user_id is None
     ):
-      raise WorkflowValidationException("This ticket is not waiting for a citizen response.")
-    return_to = await _require_active_staff(db, ticket.return_to_user_id)
+      raise TicketActionNotAllowedException(
+        "This ticket is not waiting for a citizen response."
+      )
+    return_to = await _load_user(db, ticket.return_to_user_id)
+    if return_to is None or not TicketWorkflowPolicy.processing_target_is_eligible(return_to):
+      raise TicketTargetUnavailableException("The return target is no longer available.")
     event = await TicketEventStore.append(
       db,
       ticket,
@@ -401,14 +360,8 @@ class TicketWorkflowCommandService:
     """Return an incorrectly assigned active ticket to the central inbox."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    _require_current_assignee(ticket, current_user)
-    _require_active_processing(
-      ticket,
-      "Only actively processed tickets may be returned to dispatch.",
-    )
-    if ticket.office_id is None:
-      raise WorkflowValidationException("The ticket is already in the central inbox.")
-
+    TicketWorkflowPolicy.require_action(ticket, current_user, request.action)
+    assert ticket.office_id is not None
     await TicketEventStore.append(
       db,
       ticket,
@@ -432,20 +385,15 @@ class TicketWorkflowCommandService:
     """Complete a ticket with the requested public outcome."""
 
     ticket = await require_ticket(db, ticket_id, for_update=True)
-    _require_current_assignee(ticket, current_user)
-    _require_active_processing(ticket, "Only active tickets may be completed.")
-    if request.outcome.value == "REJECTED" and current_user.role != Role.MANAGER:
-      raise ForbiddenException("Only managers may reject a ticket")
-
+    TicketWorkflowPolicy.require_action(ticket, current_user, request.action)
+    if request.outcome not in TicketWorkflowPolicy.completion_outcomes(current_user):
+      raise TicketCompletionOutcomeNotAllowedException()
     await TicketEventStore.append(
       db,
       ticket,
       actor_user_id=current_user.id,
       event_type=TicketEventType.TICKET_COMPLETED,
-      payload=TicketCompletedPayload(
-        outcome=request.outcome,
-        message=request.message,
-      ),
+      payload=TicketCompletedPayload(outcome=request.outcome, message=request.message),
     )
     return ticket
 
@@ -471,4 +419,4 @@ class TicketWorkflowCommandService:
     for request_type, handler in handlers.items():
       if isinstance(request, request_type):
         return await handler(db, ticket_id, request, current_user)
-    raise WorkflowValidationException("Unsupported workflow action.")
+    raise TicketActionNotAllowedException("Unsupported workflow action.")

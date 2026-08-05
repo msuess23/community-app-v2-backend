@@ -18,6 +18,7 @@ from src.ticket.domain import (
   rebuild_ticket,
 )
 from src.ticket.models import Ticket, TicketEvent
+from src.ticket.services.errors import TicketProjectionVersionMismatchException
 from src.ticket.repositories.event import TicketEventRepository
 from src.ticket.repositories.ticket import TicketProjectionRepository
 
@@ -110,6 +111,13 @@ class TicketEventStore:
     occurred_at: datetime | None = None,
   ) -> TicketEvent:
     """Atomically append an event and update the in-transaction projection."""
+
+    persisted_version = await TicketEventRepository.get_last_sequence_number(
+      db,
+      ticket.id,
+    )
+    if persisted_version != ticket.version:
+      raise TicketProjectionVersionMismatchException()
 
     event_time = occurred_at or datetime.now(timezone.utc)
     next_state = evolve_ticket(

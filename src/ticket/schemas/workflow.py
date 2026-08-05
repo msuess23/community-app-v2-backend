@@ -16,6 +16,7 @@ from src.ticket.domain import (
   TicketEventType,
   TicketWorkflowAction,
 )
+from src.ticket.schemas.references import OfficeReference, StaffUserReference, UserReference
 from src.ticket.schemas.ticket import TicketInternalResponse
 
 
@@ -107,6 +108,13 @@ TicketWorkflowRequest: TypeAlias = Annotated[
 ]
 
 
+class TicketEventReferences(BaseModel):
+  """Resolved labels for identifiers stored in an immutable event payload."""
+
+  users: list[UserReference] = Field(default_factory=list)
+  offices: list[OfficeReference] = Field(default_factory=list)
+
+
 class TicketEventResponse(BaseModel):
   """Internal chronological event record used by the authority client."""
 
@@ -115,14 +123,29 @@ class TicketEventResponse(BaseModel):
   sequence_number: int
   event_type: TicketEventType
   actor_user_id: UUID
+  actor: UserReference
   occurred_at: datetime
   payload: dict[str, Any]
+  references: TicketEventReferences = Field(default_factory=TicketEventReferences)
 
 
 class TicketInternalDetailResponse(TicketInternalResponse):
   """Internal detail response including commands currently allowed."""
 
   allowed_actions: list[TicketWorkflowAction] = Field(default_factory=list)
+
+
+class TicketWorkflowOptionsResponse(BaseModel):
+  """Only the selectable targets valid for the current ticket and actor."""
+
+  ticket_id: UUID
+  version: int
+  offices: list[OfficeReference] = Field(default_factory=list)
+  primary_officers: list[StaffUserReference] = Field(default_factory=list)
+  forward_targets: list[StaffUserReference] = Field(default_factory=list)
+  cosignature_targets: list[StaffUserReference] = Field(default_factory=list)
+  escalation_targets: list[StaffUserReference] = Field(default_factory=list)
+  completion_outcomes: list[TicketCompletionOutcome] = Field(default_factory=list)
 
 
 class TicketCitizenResponseRequest(StrictRequestModel):

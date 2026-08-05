@@ -304,7 +304,7 @@ Fachliche Zustände werden über dieselben Services, Policies und Event Stores e
 
 ## Tickets
 
-Tickets sind eventgesourct und besitzen zusätzlich eine aktuelle Projektion für schnelle Abfragen.
+Tickets sind eventgesourct und besitzen zusätzlich eine aktuelle Projektion für schnelle Abfragen. Vor jedem Append wird geprüft, dass Projektionsversion und letzte Eventsequenz übereinstimmen; Eventzeilen können weder verändert oder gelöscht noch über einen Cascade Delete des Aggregats entfernt werden.
 
 Unterstützt werden unter anderem:
 
@@ -317,11 +317,18 @@ Unterstützt werden unter anderem:
 - Mitzeichnungsanforderungen,
 - Eskalationen und Managemententscheidungen,
 - Rückfragen an Citizens,
-- Rückgabe an Dispatch,
+- Rückgabe an Dispatch in einen eigenen Redispatch-Zustand,
+- serverseitige, aktionsbezogene Auswahloptionen für Offices und Mitarbeitende,
 - erfolgreicher Abschluss oder fachliche Ablehnung,
 - öffentliche Statushistorie und interne Eventhistorie.
 
-Der Weg zwischen Einreichung und Abschluss ist nicht auf eine feste Sequenz begrenzt. Beteiligte Mitarbeitende und Zwischenschritte können abhängig von Zustand, Rolle und fachlicher Entscheidung gewählt werden.
+Der Weg zwischen Einreichung und Abschluss ist nicht auf eine feste Sequenz begrenzt. Beteiligte Mitarbeitende und Zwischenschritte können abhängig von Zustand, Rolle und fachlicher Entscheidung gewählt werden. Eine gemeinsame Workflow-Policy berechnet sowohl die erlaubten Aktionen und Auswahloptionen als auch die endgültige Commandvalidierung.
+
+Die synchron gepflegten Ticket- und Appointment-Projektionen können gegen einen vollständigen Replay geprüft werden:
+
+```bash
+python -m scripts.verify_event_projections
+```
 
 ## Appointments
 

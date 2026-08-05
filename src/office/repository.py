@@ -51,6 +51,24 @@ class OfficeRepository:
     return result.scalars().first()
 
   @staticmethod
+  async def get_active_offices(db: AsyncSession) -> list[Office]:
+    """Return active offices selectable by the ticket dispatcher."""
+
+    result = await db.execute(
+      select(Office).where(Office.is_active.is_(True)).order_by(Office.name, Office.id)
+    )
+    return list(result.scalars().all())
+
+  @staticmethod
+  async def get_by_ids(db: AsyncSession, office_ids: set[uuid.UUID]) -> list[Office]:
+    """Batch-load office references used by one ticket event page."""
+
+    if not office_ids:
+      return []
+    result = await db.execute(select(Office).where(Office.id.in_(office_ids)))
+    return list(result.scalars().all())
+
+  @staticmethod
   async def get_page(
     db: AsyncSession,
     *,

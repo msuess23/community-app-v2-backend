@@ -20,6 +20,7 @@ from src.ticket.domain import (
   TicketVisibility,
   TicketWorkflowState,
 )
+from src.ticket.schemas.references import OfficeReference, UserReference
 
 
 class TicketCreateRequest(StrictRequestModel):
@@ -35,11 +36,7 @@ class TicketCreateRequest(StrictRequestModel):
 class TicketUpdateRequest(StrictRequestModel):
   """Citizen-editable fields while the ticket is still new."""
 
-  title: NonNullableNormalizedUpdateText = Field(
-    None,
-    min_length=3,
-    max_length=255,
-  )
+  title: NonNullableNormalizedUpdateText = Field(None, min_length=3, max_length=255)
   description: NormalizedOptionalText = Field(None, max_length=5000)
   category: TicketCategory | None = None
   address: AddressCreate | None = None
@@ -78,9 +75,11 @@ class TicketResponse(BaseModel):
   description: str | None = None
   category: TicketCategory
   office_id: UUID | None = None
+  office: OfficeReference | None = None
   address: AddressResponse | None = None
   visibility: TicketVisibility
   created_at: datetime
+  updated_at: datetime
   current_status: TicketStatusResponse | None = None
   image_url: str | None = None
   can_edit: bool = False
@@ -92,7 +91,11 @@ class TicketInternalResponse(TicketResponse):
   """Additional workflow fields shown only to authority users."""
 
   creator_user_id: UUID
+  creator: UserReference
   workflow_state: TicketWorkflowState
   primary_officer_id: UUID | None = None
+  primary_officer: UserReference | None = None
   current_assignee_id: UUID | None = None
+  current_assignee: UserReference | None = None
   return_to_user_id: UUID | None = None
+  return_to_user: UserReference | None = None

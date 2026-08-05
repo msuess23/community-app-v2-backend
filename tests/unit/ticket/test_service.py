@@ -91,6 +91,7 @@ def test_ticket_response_locks_citizen_edits_after_processing_starts() -> None:
     workflow_state=TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
     visibility=TicketVisibility.PUBLIC,
     created_at=datetime.now(timezone.utc),
+    updated_at=datetime.now(timezone.utc),
     version=2,
     images=[],
   )

@@ -147,7 +147,7 @@ def evolve_ticket(
     next_state.primary_officer_id = None
     next_state.current_assignee_id = None
     next_state.return_to_user_id = None
-    next_state.workflow_state = TicketWorkflowState.NEW
+    next_state.workflow_state = TicketWorkflowState.RETURNED_TO_DISPATCH
     next_state.public_status = TicketStatus.IN_PROGRESS
     next_state.public_status_message = "Ticket returned for reassignment"
   elif event_type == TicketEventType.TICKET_FORWARDED:

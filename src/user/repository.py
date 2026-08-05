@@ -91,6 +91,36 @@ class UserRepository:
     )
 
   @staticmethod
+  async def get_active_authority_users(
+    db: AsyncSession,
+    *,
+    roles: set[Role] | None = None,
+    office_id: uuid.UUID | None = None,
+  ) -> list[User]:
+    """Return active authority users for ticket workflow option building."""
+
+    query = select(User).where(
+      User.is_active.is_(True),
+      User.role != Role.CITIZEN,
+      User.role != Role.ADMIN,
+    )
+    if roles is not None:
+      query = query.where(User.role.in_(roles))
+    if office_id is not None:
+      query = query.where(User.office_id == office_id)
+    result = await db.execute(query.order_by(User.last_name, User.first_name, User.id))
+    return list(result.scalars().all())
+
+  @staticmethod
+  async def get_by_ids(db: AsyncSession, user_ids: set[uuid.UUID]) -> list[User]:
+    """Batch-load user references used by one ticket event page."""
+
+    if not user_ids:
+      return []
+    result = await db.execute(select(User).where(User.id.in_(user_ids)))
+    return list(result.scalars().all())
+
+  @staticmethod
   async def has_active_users_for_office(
     db: AsyncSession,
     office_id: uuid.UUID,

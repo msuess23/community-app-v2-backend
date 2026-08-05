@@ -20,6 +20,7 @@ from src.appointment.models import (
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal, Base, engine
 from src.info.models import Info, InfoImage, InfoStatus, InfoStatusEntry
+from src.ticket.domain import TicketWorkflowState
 from src.ticket.models import Ticket, TicketEvent, TicketImage
 
 
@@ -70,6 +71,9 @@ async def _catalog_snapshot() -> dict[str, object]:
     appointment_statuses = set(
       (await db.execute(select(Appointment.status).distinct())).scalars().all()
     )
+    ticket_workflow_states = set(
+      (await db.execute(select(Ticket.workflow_state).distinct())).scalars().all()
+    )
     ticket_event_types = set(
       (await db.execute(select(TicketEvent.event_type).distinct())).scalars().all()
     )
@@ -81,6 +85,7 @@ async def _catalog_snapshot() -> dict[str, object]:
       "info_statuses": info_statuses,
       "info_image_alt_texts": info_image_alt_texts,
       "appointment_statuses": appointment_statuses,
+      "ticket_workflow_states": ticket_workflow_states,
       "ticket_event_types": ticket_event_types,
       "appointment_event_types": appointment_event_types,
     }
@@ -139,6 +144,7 @@ async def test_complete_seed_catalog_is_varied_and_idempotent(
     assert first["appointment_slots"] >= 9
     assert first["info_statuses"] == set(InfoStatus)
     assert first["appointment_statuses"] == set(AppointmentStatus)
+    assert TicketWorkflowState.RETURNED_TO_DISPATCH in first["ticket_workflow_states"]
     assert len(first["ticket_event_types"]) >= 12
     assert len(first["appointment_event_types"]) == 6
     assert len(first_files) == 10

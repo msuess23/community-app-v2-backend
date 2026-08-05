@@ -156,7 +156,6 @@ class Appointment(Base):
     "AppointmentEvent",
     back_populates="appointment",
     order_by="AppointmentEvent.sequence_number",
-    cascade="all, delete-orphan",
   )
   documents = relationship(
     "AppointmentDocument",
@@ -263,7 +262,7 @@ class AppointmentEvent(Base):
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
   appointment_id = Column(
     UUID(as_uuid=True),
-    ForeignKey("appointments.id", ondelete="CASCADE"),
+    ForeignKey("appointments.id", ondelete="RESTRICT"),
     nullable=False,
     index=True,
   )

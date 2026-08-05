@@ -10,6 +10,7 @@ def test_ticket_openapi_exposes_public_and_workflow_endpoints() -> None:
   assert "/api/v1/tickets/{ticket_id}/internal" in paths
   assert "/api/v1/tickets/{ticket_id}/events" in paths
   assert "/api/v1/tickets/{ticket_id}/workflow" in paths
+  assert "/api/v1/tickets/{ticket_id}/workflow-options" in paths
   assert "/api/v1/tickets/{ticket_id}/allowed-actions" not in paths
 
 
@@ -53,12 +54,18 @@ def test_ticket_openapi_uses_snake_case_contract() -> None:
     "updated_to",
     "sort_by",
   } <= queue_parameters
-  assert {"current_status", "image_url"} <= ticket_fields
+  assert {"current_status", "image_url", "office", "updated_at"} <= ticket_fields
   assert "creator_user_id" not in ticket_fields
   internal_fields = set(
     spec["components"]["schemas"]["TicketInternalResponse"]["properties"]
   )
-  assert "creator_user_id" in internal_fields
+  assert {
+    "creator_user_id",
+    "creator",
+    "primary_officer",
+    "current_assignee",
+    "return_to_user",
+  } <= internal_fields
   assert "target_user_id" in cosignature_fields
   assert "targetUserId" not in cosignature_fields
 
@@ -68,7 +75,9 @@ def test_public_ticket_schemas_do_not_expose_internal_user_ids() -> None:
 
   assert "creator_user_id" not in schemas["TicketResponse"]["properties"]
   assert "created_by_user_id" not in schemas["TicketStatusResponse"]["properties"]
-  assert "author_user_id" not in schemas["TicketCommentResponse"]["properties"]
+  comment_fields = schemas["TicketCommentResponse"]["properties"]
+  assert "author_user_id" not in comment_fields
+  assert "author" in comment_fields
   image_fields = schemas["TicketImageResponse"]["properties"]
   assert "uploaded_by_user_id" not in image_fields
   assert {"width", "height", "is_cover"} <= image_fields.keys()
@@ -91,3 +100,21 @@ def test_histories_and_ticket_events_use_common_page_contract() -> None:
 
     assert {"page", "size"} <= parameter_names
     assert response_schema["$ref"].split("/")[-1].startswith("PaginatedResponse_")
+
+
+def test_ticket_event_contract_resolves_actor_and_payload_references() -> None:
+  schemas = app.openapi()["components"]["schemas"]
+
+  event_fields = schemas["TicketEventResponse"]["properties"]
+  options_fields = schemas["TicketWorkflowOptionsResponse"]["properties"]
+
+  assert {"actor_user_id", "actor", "references"} <= event_fields.keys()
+  assert {
+    "version",
+    "offices",
+    "primary_officers",
+    "forward_targets",
+    "cosignature_targets",
+    "escalation_targets",
+    "completion_outcomes",
+  } <= options_fields.keys()

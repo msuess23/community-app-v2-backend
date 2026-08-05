@@ -137,7 +137,6 @@ class Ticket(Base):
     "TicketEvent",
     back_populates="ticket",
     order_by="TicketEvent.sequence_number",
-    cascade="all, delete-orphan",
   )
   images = relationship(
     "TicketImage",
@@ -163,7 +162,7 @@ class TicketEvent(Base):
   id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
   ticket_id = Column(
     UUID(as_uuid=True),
-    ForeignKey("tickets.id", ondelete="CASCADE"),
+    ForeignKey("tickets.id", ondelete="RESTRICT"),
     nullable=False,
     index=True,
   )

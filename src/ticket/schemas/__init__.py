@@ -1,10 +1,16 @@
 """Explicit public request and response schemas for the ticket API."""
 
 from src.ticket.schemas.assets import (
+  TicketCommentAuthorResponse,
   TicketCommentCreateRequest,
   TicketCommentResponse,
   TicketImageRemoveRequest,
   TicketImageResponse,
+)
+from src.ticket.schemas.references import (
+  OfficeReference,
+  StaffUserReference,
+  UserReference,
 )
 from src.ticket.schemas.ticket import (
   TicketCancelRequest,
@@ -28,6 +34,7 @@ from src.ticket.schemas.workflow import (
   TicketDispatchRequest,
   TicketEventResponse,
   TicketInternalDetailResponse,
+  TicketWorkflowOptionsResponse,
   TicketWorkflowRequest,
 )
 
@@ -38,11 +45,14 @@ __all__ = [
   "EscalateTicketAction",
   "ForwardTicketAction",
   "PrimaryOfficerAssignmentRequest",
+  "OfficeReference",
+  "StaffUserReference",
   "RequestCitizenResponseAction",
   "RequestCosignatureAction",
   "ReturnToDispatchAction",
   "TicketCancelRequest",
   "TicketCitizenResponseRequest",
+  "TicketCommentAuthorResponse",
   "TicketCommentCreateRequest",
   "TicketCommentResponse",
   "TicketCreateRequest",
@@ -55,5 +65,7 @@ __all__ = [
   "TicketResponse",
   "TicketStatusResponse",
   "TicketUpdateRequest",
+  "TicketWorkflowOptionsResponse",
   "TicketWorkflowRequest",
+  "UserReference",
 ]

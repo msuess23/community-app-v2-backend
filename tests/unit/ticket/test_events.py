@@ -219,5 +219,5 @@ def test_return_to_dispatch_clears_office_ownership_for_redispatch() -> None:
   assert state.primary_officer_id is None
   assert state.current_assignee_id is None
   assert state.return_to_user_id is None
-  assert state.workflow_state == TicketWorkflowState.NEW
+  assert state.workflow_state == TicketWorkflowState.RETURNED_TO_DISPATCH
   assert state.public_status == TicketStatus.IN_PROGRESS

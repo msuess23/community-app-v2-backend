@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -19,6 +20,14 @@ class TicketCommentCreateRequest(StrictRequestModel):
   is_internal: bool = False
 
 
+class TicketCommentAuthorResponse(BaseModel):
+  """Privacy-aware author label for a public or internal comment response."""
+
+  id: UUID | None = None
+  display_name: str
+  author_type: Literal["CITIZEN", "AUTHORITY"]
+
+
 class TicketCommentResponse(BaseModel):
   """Comment projection reconstructed directly from a ticket event."""
 
@@ -27,6 +36,7 @@ class TicketCommentResponse(BaseModel):
   text: str
   is_internal: bool
   created_at: datetime
+  author: TicketCommentAuthorResponse
 
 
 class TicketImageResponse(ImageMetadataResponse):

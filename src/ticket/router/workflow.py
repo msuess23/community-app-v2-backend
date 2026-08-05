@@ -33,6 +33,7 @@ from src.ticket.schemas.workflow import (
   TicketDispatchRequest,
   TicketEventResponse,
   TicketInternalDetailResponse,
+  TicketWorkflowOptionsResponse,
   TicketWorkflowRequest,
 )
 from src.ticket.services.workflow_commands import TicketWorkflowCommandService
@@ -97,6 +98,24 @@ async def get_internal_ticket(
   """Return workflow fields and the commands currently available."""
 
   return await TicketWorkflowQueryService.get_internal_ticket(db, ticket_id, current_user)
+
+
+@router.get(
+  "/{ticket_id}/workflow-options",
+  response_model=TicketWorkflowOptionsResponse,
+)
+async def get_ticket_workflow_options(
+  ticket_id: uuid.UUID,
+  db: AsyncSession = Depends(get_db, scope="function"),
+  current_user: User = Depends(role_required(*AUTHORITY_ROLES)),
+):
+  """Return targets selectable for the caller's current workflow actions."""
+
+  return await TicketWorkflowQueryService.get_workflow_options(
+    db,
+    ticket_id,
+    current_user,
+  )
 
 
 @router.get(

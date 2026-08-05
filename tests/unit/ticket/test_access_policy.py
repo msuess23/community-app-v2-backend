@@ -54,6 +54,10 @@ def test_dispatcher_internal_access_is_limited_to_routing_states() -> None:
     _ticket(TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT),
     dispatcher,
   )
+  assert TicketAccessPolicy.can_view_internal(
+    _ticket(TicketWorkflowState.RETURNED_TO_DISPATCH),
+    dispatcher,
+  )
   assert not TicketAccessPolicy.can_view_internal(
     _ticket(TicketWorkflowState.IN_PROGRESS),
     dispatcher,
@@ -87,9 +91,26 @@ def test_capabilities_use_the_same_owner_and_staff_rules() -> None:
   officer = _user(Role.OFFICER, office_id=uuid4())
   ticket.office_id = officer.office_id
   ticket.workflow_state = TicketWorkflowState.IN_PROGRESS
-  staff_capabilities = TicketAccessPolicy.capabilities(ticket, officer)
+  unrelated_capabilities = TicketAccessPolicy.capabilities(ticket, officer)
 
-  assert staff_capabilities.can_edit is False
-  assert staff_capabilities.can_manage_images is True
-  assert staff_capabilities.can_comment is True
-  assert staff_capabilities.can_view_internal is True
+  assert unrelated_capabilities.can_edit is False
+  assert unrelated_capabilities.can_manage_images is False
+  assert unrelated_capabilities.can_comment is False
+  assert unrelated_capabilities.can_view_internal is False
+
+  ticket.current_assignee_id = officer.id
+  participant_capabilities = TicketAccessPolicy.capabilities(ticket, officer)
+  assert participant_capabilities.can_manage_images is True
+  assert participant_capabilities.can_comment is True
+  assert participant_capabilities.can_view_internal is True
+
+
+def test_returned_ticket_does_not_restore_citizen_edit_rights() -> None:
+  citizen = _user(Role.CITIZEN)
+  ticket = _ticket(TicketWorkflowState.RETURNED_TO_DISPATCH)
+  ticket.creator_user_id = citizen.id
+
+  capabilities = TicketAccessPolicy.capabilities(ticket, citizen)
+
+  assert capabilities.can_edit is False
+  assert capabilities.can_manage_images is False

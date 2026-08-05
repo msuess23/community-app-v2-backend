@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 
 from src.core.filters import SortOrder
 from src.core.pagination import execute_page
@@ -31,6 +33,7 @@ class TicketEventRepository:
 
     result = await db.execute(
       select(TicketEvent)
+      .options(selectinload(TicketEvent.actor))
       .where(TicketEvent.ticket_id == ticket_id)
       .order_by(TicketEvent.sequence_number.asc())
     )
@@ -46,7 +49,11 @@ class TicketEventRepository:
   ) -> tuple[list[TicketEvent], int]:
     """Return a chronological page of one aggregate event stream."""
 
-    query = select(TicketEvent).where(TicketEvent.ticket_id == ticket_id)
+    query = (
+      select(TicketEvent)
+      .options(selectinload(TicketEvent.actor))
+      .where(TicketEvent.ticket_id == ticket_id)
+    )
     return await execute_page(
       db,
       query,
@@ -68,6 +75,7 @@ class TicketEventRepository:
       return []
     result = await db.execute(
       select(TicketEvent)
+      .options(selectinload(TicketEvent.actor))
       .where(TicketEvent.ticket_id.in_(ticket_ids))
       .order_by(TicketEvent.ticket_id.asc(), TicketEvent.sequence_number.asc())
     )
@@ -82,6 +90,7 @@ class TicketEventRepository:
 
     result = await db.execute(
       select(TicketEvent)
+      .options(selectinload(TicketEvent.actor))
       .where(
         TicketEvent.ticket_id == ticket_id,
         TicketEvent.event_type == TicketEventType.TICKET_COMMENTED,
@@ -89,3 +98,18 @@ class TicketEventRepository:
       .order_by(TicketEvent.sequence_number.asc())
     )
     return list(result.scalars().all())
+
+  @staticmethod
+  async def get_last_sequence_number(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+  ) -> int:
+    """Return the persisted stream version for projection verification."""
+
+    result = await db.execute(
+      select(func.coalesce(func.max(TicketEvent.sequence_number), 0)).where(
+        TicketEvent.ticket_id == ticket_id
+      )
+    )
+    return int(result.scalar_one())
+
