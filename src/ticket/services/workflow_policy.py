@@ -29,6 +29,12 @@ class TicketWorkflowPolicy:
       TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
     }
   )
+  DISPATCHABLE_STATES = frozenset(
+    {
+      TicketWorkflowState.NEW,
+      TicketWorkflowState.RETURNED_TO_DISPATCH,
+    }
+  )
 
   @staticmethod
   def allowed_actions(ticket: Ticket, actor: User) -> list[TicketWorkflowAction]:
@@ -38,7 +44,7 @@ class TicketWorkflowPolicy:
     if (
       actor.role == Role.DISPATCHER
       and ticket.primary_officer_id is None
-      and ticket.workflow_state in TicketWorkflowPolicy.ROUTING_STATES
+      and ticket.workflow_state in TicketWorkflowPolicy.DISPATCHABLE_STATES
     ):
       actions.append(TicketWorkflowAction.DISPATCH)
 

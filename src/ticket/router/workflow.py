@@ -128,7 +128,7 @@ async def get_internal_ticket_events(
   db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(role_required(*AUTHORITY_ROLES)),
 ):
-  """Return a chronological page of the append-only event stream."""
+  """Return the append-only event stream with the newest events first."""
 
   return await TicketWorkflowQueryService.get_internal_events(
     db,

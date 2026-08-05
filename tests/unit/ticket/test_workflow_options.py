@@ -100,6 +100,40 @@ async def test_dispatcher_options_only_expose_active_dispatch_offices(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_dispatcher_options_do_not_offer_redispatch_after_office_assignment(
+  monkeypatch,
+) -> None:
+  dispatcher = _user(Role.DISPATCHER)
+  ticket = _ticket(
+    dispatcher,
+    office_id=uuid4(),
+    state=TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
+  )
+  office_lookup = AsyncMock()
+
+  monkeypatch.setattr(
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id",
+    AsyncMock(return_value=ticket),
+  )
+  monkeypatch.setattr(
+    "src.office.repository.OfficeRepository.get_active_offices",
+    office_lookup,
+  )
+
+  response = await TicketWorkflowQueryService.get_workflow_options(
+    AsyncMock(), ticket.id, dispatcher
+  )
+
+  office_lookup.assert_not_awaited()
+  assert response.offices == []
+  assert response.primary_officers == []
+  assert response.forward_targets == []
+  assert response.cosignature_targets == []
+  assert response.escalation_targets == []
+  assert response.completion_outcomes == []
+
+
+@pytest.mark.asyncio
 async def test_manager_options_filter_primary_officers_to_assigned_office(monkeypatch) -> None:
   office_id = uuid4()
   manager = _user(Role.MANAGER, office_id=office_id)

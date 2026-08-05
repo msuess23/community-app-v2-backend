@@ -47,7 +47,7 @@ class TicketEventRepository:
     page: int,
     size: int,
   ) -> tuple[list[TicketEvent], int]:
-    """Return a chronological page of one aggregate event stream."""
+    """Return one event page with the newest aggregate changes first."""
 
     query = (
       select(TicketEvent)
@@ -60,7 +60,7 @@ class TicketEventRepository:
       page=page,
       size=size,
       sort_column=TicketEvent.sequence_number,
-      order=SortOrder.ASC,
+      order=SortOrder.DESC,
       tie_breaker=TicketEvent.id,
     )
 

@@ -288,7 +288,7 @@ class TicketWorkflowQueryService:
     page: int,
     size: int,
   ) -> PaginatedResponse[TicketEventResponse]:
-    """Return a chronological page of events to authorized staff."""
+    """Return the newest internal ticket events first for authorized staff."""
 
     ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     if ticket is None or not TicketAccessPolicy.can_view_internal(ticket, current_user):

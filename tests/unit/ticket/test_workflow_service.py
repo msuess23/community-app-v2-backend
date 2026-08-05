@@ -15,6 +15,7 @@ from src.ticket.domain import (
 )
 from src.ticket.models import Ticket, TicketEvent
 from src.ticket.schemas import PrimaryOfficerAssignmentRequest, TicketDispatchRequest
+from src.ticket.services.errors import TicketActionNotAllowedException
 from src.ticket.services.workflow_commands import TicketWorkflowCommandService
 from src.ticket.services.workflow_queries import TicketWorkflowQueryService
 from src.user.models import Role, User
@@ -109,6 +110,43 @@ async def test_dispatch_moves_ticket_to_active_office(monkeypatch) -> None:
   assert response is ticket
   assert ticket.office_id == office_id
   assert staged[-1].event_type == TicketEventType.TICKET_DISPATCHED
+  assert ticket.workflow_state == TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT
+  assert TicketWorkflowQueryService._allowed_actions(ticket, dispatcher) == []
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_cannot_dispatch_ticket_twice(monkeypatch) -> None:
+  db = AsyncMock()
+  dispatcher = _user(Role.DISPATCHER)
+  office_id = uuid4()
+  ticket = _ticket(
+    uuid4(),
+    workflow_state=TicketWorkflowState.AWAITING_PRIMARY_ASSIGNMENT,
+    office_id=uuid4(),
+    version=2,
+  )
+  office_lookup = AsyncMock()
+
+  monkeypatch.setattr(
+    "src.ticket.repositories.ticket.TicketProjectionRepository.get_by_id_for_update",
+    AsyncMock(return_value=ticket),
+  )
+  monkeypatch.setattr(
+    "src.office.repository.OfficeRepository.get_by_id",
+    office_lookup,
+  )
+
+  with pytest.raises(TicketActionNotAllowedException):
+    await TicketWorkflowCommandService.dispatch_ticket(
+      db,
+      ticket.id,
+      TicketDispatchRequest(office_id=office_id),
+      dispatcher,
+    )
+
+  office_lookup.assert_not_awaited()
+  assert ticket.office_id is not None
+  assert ticket.version == 2
 
 
 @pytest.mark.asyncio
