@@ -322,6 +322,8 @@ async def run_appointment_seeder(
     slot.status = AppointmentSlotStatus.AVAILABLE
     await db.flush()
 
+  # Outcome comments deliberately contain internal staff notes. The citizen
+  # event contract must redact them while preserving the immutable stream.
   if await _get_appointment(db, APPOINTMENT_SEED_KEYS[3]) is None:
     slot = await _ensure_slot(
       db,
@@ -393,6 +395,8 @@ async def run_appointment_seeder(
     slot.status = AppointmentSlotStatus.CONSUMED
     await db.flush()
 
+  # The linked scenario feeds readable ticket filter options and the
+  # can_view flag without requiring the frontend to resolve raw UUIDs.
   if await _get_appointment(db, APPOINTMENT_SEED_KEYS[5]) is None:
     linked_ticket = await _get_ticket(db, TICKET_SEED_TITLES[8])
     if linked_ticket is None:

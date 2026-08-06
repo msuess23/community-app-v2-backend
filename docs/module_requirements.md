@@ -50,7 +50,7 @@ Ticket comments and ticket image changes are also represented as immutable ticke
 - Projection/stream verification before every append
 - Database-level `RESTRICT` foreign keys and append-only triggers for event retention
 
-Appointment document versions append `DOCUMENT_VERSION_ADDED` events without changing scheduling state.
+Appointment document versions append `DOCUMENT_VERSION_ADDED` events without changing scheduling state. Appointment API responses embed data-minimizing office, citizen, linked-ticket, and internal actor references. Internal completion and no-show notes remain in the append-only stream but are redacted from citizen event responses. Paginated appointment histories are exposed newest-first, while deterministic aggregate replay continues to use the complete ascending stream.
 
 ## Complete and genuine CRUD entity
 

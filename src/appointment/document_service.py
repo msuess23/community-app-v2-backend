@@ -22,7 +22,11 @@ from src.appointment.repository import (
 )
 from src.appointment.schemas import AppointmentDocumentResponse
 from src.core.config import settings
-from src.core.exceptions import ForbiddenException, ResourceNotFoundException
+from src.core.exceptions import (
+  DomainValidationException,
+  ForbiddenException,
+  ResourceNotFoundException,
+)
 from src.core.transaction_files import (
   register_rollback_file,
   unregister_rollback_file,
@@ -159,6 +163,11 @@ class AppointmentDocumentService:
         raise ResourceNotFoundException(
           "Appointment document group not found",
           error_code="APPOINTMENT_DOCUMENT_GROUP_NOT_FOUND",
+        )
+      if replaced.document_type != document_type:
+        raise DomainValidationException(
+          "A replacement must keep the document group's type.",
+          error_code="APPOINTMENT_DOCUMENT_TYPE_MISMATCH",
         )
 
     document_group_id = (

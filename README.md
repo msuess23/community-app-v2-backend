@@ -343,7 +343,14 @@ Unterstützt werden:
 - optionale Verbindung zu einem Ticket,
 - bürgersichtbare und interne Dokumente,
 - unveränderliche PDF-Versionen mit aktueller Dokumentversion,
-- Appointment-Eventhistorie.
+- Appointment-Eventhistorie mit den neuesten Ereignissen zuerst,
+- lesbare Office-, Citizen-, Ticket- und Actor-Referenzen,
+- behördliche Filteroptionen aus dem jeweils sichtbaren Appointmentbestand,
+- authentifizierte PDF-Downloads mit binärem OpenAPI-Vertrag.
+
+Interne Abschluss- und No-Show-Notizen verbleiben im unveränderlichen
+Eventstream, werden aber aus Citizen-Antworten entfernt. Dokumentversionen
+einer Gruppe behalten denselben Dokumenttyp.
 
 ## Infos
 

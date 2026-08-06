@@ -98,3 +98,19 @@ def test_citizen_document_event_hides_storage_key() -> None:
 
   assert response.actor_user_id is None
   assert "storage_key" not in response.payload
+
+
+def test_citizen_no_show_event_hides_internal_comment() -> None:
+  event = AppointmentEvent(
+    id=uuid.uuid4(),
+    appointment_id=uuid.uuid4(),
+    sequence_number=3,
+    event_type=AppointmentEventType.APPOINTMENT_MARKED_NO_SHOW,
+    actor_user_id=uuid.uuid4(),
+    occurred_at=datetime.now(timezone.utc),
+    payload={"comment": "Internal no-show assessment"},
+  )
+
+  response = AppointmentService.event_response(event, include_actor=False)
+
+  assert "comment" not in response.payload

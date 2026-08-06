@@ -11,6 +11,7 @@ from src.appointment.access_policy import AppointmentAccessPolicy
 from src.appointment.domain import (
   AppointmentAction,
   AppointmentBookedPayload,
+  AppointmentEventType,
   AppointmentSlotStatus,
   AppointmentSortField,
   AppointmentStatus,
@@ -25,7 +26,11 @@ from src.appointment.repository import (
 from src.appointment.schemas import (
   AppointmentBookRequest,
   AppointmentEventResponse,
+  AppointmentFilterOptionsResponse,
+  AppointmentOfficeReference,
   AppointmentResponse,
+  AppointmentTicketReference,
+  AppointmentUserReference,
 )
 from src.core.exceptions import (
   ConflictException,
@@ -37,12 +42,59 @@ from src.core.filters import SortOrder
 from src.core.schemas import PaginatedResponse
 from src.office.repository import OfficeRepository
 from src.ticket.domain import TicketStatus
+from src.ticket.models import Ticket
 from src.ticket.repositories.ticket import TicketProjectionRepository
+from src.ticket.services.access_policy import TicketAccessPolicy
 from src.user.models import Role, User
+from src.user.repository import UserRepository
 
 
 class AppointmentService:
   """Book and query event-sourced appointments."""
+
+  @staticmethod
+  def _user_reference(user: User | None, user_id: uuid.UUID) -> AppointmentUserReference:
+    """Return a data-minimizing label with a safe historical fallback."""
+
+    if user is None:
+      return AppointmentUserReference(id=user_id, display_name="Unknown user")
+    return AppointmentUserReference(
+      id=user.id,
+      display_name=f"{user.first_name} {user.last_name}".strip(),
+    )
+
+  @staticmethod
+  def _office_reference(appointment: Appointment) -> AppointmentOfficeReference:
+    """Return the eagerly loaded office label without exposing full master data."""
+
+    office = getattr(appointment, "office", None)
+    return AppointmentOfficeReference(
+      id=appointment.office_id,
+      name=office.name if office is not None else "Unknown office",
+    )
+
+  @staticmethod
+  def _ticket_reference(
+    ticket: Ticket | None,
+    *,
+    ticket_id: uuid.UUID | None,
+    current_user: User,
+  ) -> AppointmentTicketReference | None:
+    """Return a readable linked-ticket label and current access indication."""
+
+    if ticket_id is None:
+      return None
+    if ticket is None:
+      return AppointmentTicketReference(
+        id=ticket_id,
+        title="Linked ticket",
+        can_view=False,
+      )
+    return AppointmentTicketReference(
+      id=ticket.id,
+      title=ticket.title,
+      can_view=TicketAccessPolicy.can_view(ticket, current_user),
+    )
 
   @staticmethod
   def allowed_actions(
@@ -73,12 +125,21 @@ class AppointmentService:
   ) -> AppointmentResponse:
     """Map one current projection to its role-aware API representation."""
 
+    citizen = getattr(appointment, "citizen", None)
+    ticket = getattr(appointment, "ticket", None)
     return AppointmentResponse(
       id=appointment.id,
       current_slot_id=appointment.current_slot_id,
       office_id=appointment.office_id,
+      office=AppointmentService._office_reference(appointment),
       citizen_id=appointment.citizen_id,
+      citizen=AppointmentService._user_reference(citizen, appointment.citizen_id),
       ticket_id=appointment.ticket_id,
+      ticket=AppointmentService._ticket_reference(
+        ticket,
+        ticket_id=appointment.ticket_id,
+        current_user=current_user,
+      ),
       reason=appointment.reason,
       status=appointment.status,
       starts_at=appointment.starts_at,
@@ -102,8 +163,8 @@ class AppointmentService:
     ticket_id: uuid.UUID,
     citizen: User,
     office_id: uuid.UUID,
-  ) -> None:
-    """Validate the immutable optional ticket relation of a booking."""
+  ) -> Ticket:
+    """Validate and return the immutable optional ticket relation of a booking."""
 
     ticket = await TicketProjectionRepository.get_by_id(db, ticket_id)
     if ticket is None or ticket.creator_user_id != citizen.id:
@@ -126,6 +187,7 @@ class AppointmentService:
         "The appointment slot must belong to the ticket's responsible office.",
         error_code="TICKET_OFFICE_MISMATCH",
       )
+    return ticket
 
   @staticmethod
   async def book_slot(
@@ -164,8 +226,9 @@ class AppointmentService:
         error_code="OFFICE_INACTIVE",
       )
 
+    linked_ticket: Ticket | None = None
     if request.ticket_id is not None:
-      await AppointmentService._validate_ticket_link(
+      linked_ticket = await AppointmentService._validate_ticket_link(
         db,
         ticket_id=request.ticket_id,
         citizen=current_user,
@@ -188,6 +251,12 @@ class AppointmentService:
       actor_user_id=current_user.id,
       payload=payload,
     )
+    # The response embeds small references. Assign already loaded objects so the
+    # create command does not need a second query after the event append.
+    appointment.office = office
+    appointment.citizen = current_user
+    appointment.ticket = linked_ticket
+    appointment.current_slot = slot
     slot.status = AppointmentSlotStatus.BOOKED
     slot.updated_at = datetime.now(timezone.utc)
     await db.flush()
@@ -237,6 +306,17 @@ class AppointmentService:
     )
 
   @staticmethod
+  def _require_internal_scope(current_user: User) -> uuid.UUID:
+    """Return the case worker office or reject users outside appointment staff."""
+
+    if current_user.office_id is None or not AppointmentAccessPolicy.can_manage_office(
+      current_user.office_id,
+      current_user,
+    ):
+      raise ForbiddenException()
+    return current_user.office_id
+
+  @staticmethod
   async def list_internal(
     db: AsyncSession,
     *,
@@ -257,12 +337,8 @@ class AppointmentService:
   ) -> PaginatedResponse:
     """Return the authority list, permanently scoped to the user's office."""
 
-    if current_user.office_id is None or not AppointmentAccessPolicy.can_manage_office(
-      current_user.office_id,
-      current_user,
-    ):
-      raise ForbiddenException()
-    if office_id is not None and office_id != current_user.office_id:
+    scoped_office_id = AppointmentService._require_internal_scope(current_user)
+    if office_id is not None and office_id != scoped_office_id:
       raise DomainValidationException(
         "The office filter is outside the current user's scope.",
         error_code="OFFICE_FILTER_OUTSIDE_SCOPE",
@@ -270,7 +346,7 @@ class AppointmentService:
 
     appointments, total = await AppointmentRepository.get_internal_page(
       db,
-      office_id=current_user.office_id,
+      office_id=scoped_office_id,
       page=page,
       size=size,
       citizen_id=citizen_id,
@@ -295,22 +371,73 @@ class AppointmentService:
     )
 
   @staticmethod
+  async def get_internal_filter_options(
+    db: AsyncSession,
+    *,
+    current_user: User,
+  ) -> AppointmentFilterOptionsResponse:
+    """Return readable filters from the caller's complete office appointment scope."""
+
+    office_id = AppointmentService._require_internal_scope(current_user)
+    citizen_ids, ticket_ids = (
+      await AppointmentRepository.get_internal_filter_reference_ids(
+        db,
+        office_id=office_id,
+      )
+    )
+    citizens = await UserRepository.get_by_ids(db, citizen_ids)
+    tickets = await AppointmentRepository.get_tickets_by_ids(db, ticket_ids)
+    citizen_references = sorted(
+      [AppointmentService._user_reference(user, user.id) for user in citizens],
+      key=lambda item: (item.display_name.casefold(), str(item.id)),
+    )
+    ticket_references = [
+      AppointmentTicketReference(
+        id=ticket.id,
+        title=ticket.title,
+        can_view=TicketAccessPolicy.can_view(ticket, current_user),
+      )
+      for ticket in tickets
+    ]
+    ticket_references.sort(
+      key=lambda item: (item.title.casefold(), str(item.id))
+    )
+    return AppointmentFilterOptionsResponse(
+      citizens=citizen_references,
+      tickets=ticket_references,
+    )
+
+  @staticmethod
   def event_response(
     event: AppointmentEvent,
     *,
     include_actor: bool,
   ) -> AppointmentEventResponse:
-    """Map one event while hiding internal identifiers from citizens."""
+    """Map one event while redacting staff-only data from citizen responses."""
 
     payload = dict(event.payload)
     if not include_actor:
-      # Storage keys are implementation details and never belong in citizen APIs.
+      # Storage keys and outcome notes are internal implementation/audit data.
       payload.pop("storage_key", None)
+      if event.event_type in {
+        AppointmentEventType.APPOINTMENT_COMPLETED,
+        AppointmentEventType.APPOINTMENT_MARKED_NO_SHOW,
+      }:
+        payload.pop("comment", None)
+    actor = (
+      AppointmentService._user_reference(
+        getattr(event, "actor", None),
+        event.actor_user_id,
+      )
+      if include_actor
+      else None
+    )
     return AppointmentEventResponse(
       id=event.id,
       sequence_number=event.sequence_number,
       event_type=event.event_type,
       actor_user_id=event.actor_user_id if include_actor else None,
+      actor=actor,
       occurred_at=event.occurred_at,
       payload=payload,
     )
@@ -324,7 +451,7 @@ class AppointmentService:
     page: int,
     size: int,
   ) -> PaginatedResponse[AppointmentEventResponse]:
-    """Return a chronological event page to the owner or responsible office."""
+    """Return a newest-first event page to the owner or responsible office."""
 
     appointment = await AppointmentRepository.get_by_id(db, appointment_id)
     if appointment is None or not AppointmentAccessPolicy.can_view(
@@ -365,13 +492,14 @@ class AppointmentService:
     """Return an appointment visible to its citizen or responsible office."""
 
     appointment = await AppointmentRepository.get_by_id(db, appointment_id)
-    if appointment is None:
+    if appointment is None or not AppointmentAccessPolicy.can_view(
+      appointment,
+      current_user,
+    ):
       raise ResourceNotFoundException(
         "Appointment not found",
         error_code="APPOINTMENT_NOT_FOUND",
       )
-    if not AppointmentAccessPolicy.can_view(appointment, current_user):
-      raise ForbiddenException()
     return AppointmentService.to_response(
       appointment,
       current_user=current_user,

@@ -25,6 +25,8 @@ from src.appointment.models import (
 from src.core.filters import SortOrder, apply_search_filter
 from src.core.pagination import execute_page
 from src.office.models import Office
+from src.ticket.models import Ticket
+from src.user.models import User
 
 
 class AppointmentSlotRepository:
@@ -187,6 +189,8 @@ class AppointmentRepository:
 
     return select(Appointment).options(
       selectinload(Appointment.office),
+      selectinload(Appointment.citizen),
+      selectinload(Appointment.ticket),
       selectinload(Appointment.current_slot),
     )
 
@@ -270,9 +274,19 @@ class AppointmentRepository:
     query = (
       AppointmentRepository._detail_query()
       .join(Office, Appointment.office_id == Office.id)
+      .join(User, Appointment.citizen_id == User.id)
+      .outerjoin(Ticket, Appointment.ticket_id == Ticket.id)
       .where(Appointment.office_id == office_id)
     )
-    query = apply_search_filter(query, search, Appointment.reason, Office.name)
+    query = apply_search_filter(
+      query,
+      search,
+      Appointment.reason,
+      User.first_name,
+      User.last_name,
+      User.email,
+      Ticket.title,
+    )
     if citizen_id is not None:
       query = query.where(Appointment.citizen_id == citizen_id)
     if ticket_id is not None:
@@ -298,6 +312,39 @@ class AppointmentRepository:
       tie_breaker=Appointment.id,
       unique=True,
     )
+
+  @staticmethod
+  async def get_internal_filter_reference_ids(
+    db: AsyncSession,
+    *,
+    office_id: uuid.UUID,
+  ) -> tuple[set[uuid.UUID], set[uuid.UUID]]:
+    """Return citizen and ticket identifiers from the complete office scope."""
+
+    result = await db.execute(
+      select(Appointment.citizen_id, Appointment.ticket_id).where(
+        Appointment.office_id == office_id
+      )
+    )
+    citizen_ids: set[uuid.UUID] = set()
+    ticket_ids: set[uuid.UUID] = set()
+    for citizen_id, ticket_id in result.all():
+      citizen_ids.add(citizen_id)
+      if ticket_id is not None:
+        ticket_ids.add(ticket_id)
+    return citizen_ids, ticket_ids
+
+  @staticmethod
+  async def get_tickets_by_ids(
+    db: AsyncSession,
+    ticket_ids: set[uuid.UUID],
+  ) -> list[Ticket]:
+    """Batch-load linked tickets used by internal filter options."""
+
+    if not ticket_ids:
+      return []
+    result = await db.execute(select(Ticket).where(Ticket.id.in_(ticket_ids)))
+    return list(result.scalars().all())
 
   @staticmethod
   async def has_scheduled_for_citizen(
@@ -372,7 +419,7 @@ class AppointmentEventRepository:
     size: int,
     citizen_visible_only: bool = False,
   ) -> tuple[list[AppointmentEvent], int]:
-    """Return a chronological event page with optional citizen filtering."""
+    """Return a newest-first event page with optional citizen filtering."""
 
     query = select(AppointmentEvent).where(
       AppointmentEvent.appointment_id == appointment_id
@@ -384,13 +431,15 @@ class AppointmentEventRepository:
           AppointmentEvent.payload["visible_to_citizen"].as_boolean().is_(True),
         )
       )
+    else:
+      query = query.options(selectinload(AppointmentEvent.actor))
     return await execute_page(
       db,
       query,
       page=page,
       size=size,
       sort_column=AppointmentEvent.sequence_number,
-      order=SortOrder.ASC,
+      order=SortOrder.DESC,
       tie_breaker=AppointmentEvent.id,
     )
 

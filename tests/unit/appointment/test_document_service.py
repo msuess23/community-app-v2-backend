@@ -292,3 +292,59 @@ async def test_upload_failure_removes_new_file(monkeypatch, tmp_path) -> None:
 
   delete_file.assert_called_once()
   assert not stored_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_replacement_rejects_a_different_document_type_before_file_storage(
+  monkeypatch,
+) -> None:
+  from src.core.exceptions import DomainValidationException
+
+  office_id = uuid.uuid4()
+  citizen = _user(Role.CITIZEN)
+  manager = _user(Role.MANAGER, office_id=office_id)
+  appointment = _appointment(citizen.id, office_id)
+  previous = AppointmentDocument(
+    id=uuid.uuid4(),
+    document_group_id=uuid.uuid4(),
+    appointment_id=appointment.id,
+    version_number=1,
+    document_type=AppointmentDocumentType.FORM,
+    storage_key="old.pdf",
+    original_filename="old.pdf",
+    mime_type="application/pdf",
+    size_bytes=10,
+    uploaded_by_user_id=manager.id,
+    uploaded_at=datetime.now(timezone.utc),
+    is_current=True,
+    visible_to_citizen=False,
+  )
+  save_upload = AsyncMock()
+  monkeypatch.setattr(
+    AppointmentRepository,
+    "get_by_id",
+    AsyncMock(return_value=appointment),
+  )
+  monkeypatch.setattr(
+    AppointmentDocumentRepository,
+    "get_current_for_group",
+    AsyncMock(return_value=previous),
+  )
+  monkeypatch.setattr(
+    "src.appointment.document_service.LocalDocumentStorage.save_upload",
+    save_upload,
+  )
+
+  with pytest.raises(DomainValidationException) as exc:
+    await AppointmentDocumentService.upload_version(
+      _db(),
+      appointment_id=appointment.id,
+      upload=object(),
+      document_type=AppointmentDocumentType.PROTOCOL,
+      visible_to_citizen=False,
+      replace_document_group_id=previous.document_group_id,
+      current_user=manager,
+    )
+
+  assert exc.value.error_code == "APPOINTMENT_DOCUMENT_TYPE_MISMATCH"
+  save_upload.assert_not_awaited()

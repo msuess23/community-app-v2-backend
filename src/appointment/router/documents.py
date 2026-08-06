@@ -88,6 +88,17 @@ async def list_appointment_document_versions(
 
 @router.get(
   "/appointments/{appointment_id}/documents/{document_version_id}/content",
+  response_class=FileResponse,
+  responses={
+    status.HTTP_200_OK: {
+      "description": "The authorized immutable PDF document version.",
+      "content": {
+        "application/pdf": {
+          "schema": {"type": "string", "format": "binary"}
+        }
+      },
+    }
+  },
   tags=["Appointment Documents"],
 )
 async def download_appointment_document(

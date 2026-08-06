@@ -13,6 +13,7 @@ from src.appointment.schemas import (
   AppointmentCancelRequest,
   AppointmentCompleteRequest,
   AppointmentEventResponse,
+  AppointmentFilterOptionsResponse,
   AppointmentNoShowRequest,
   AppointmentRescheduleRequest,
   AppointmentResponse,
@@ -130,6 +131,23 @@ async def list_internal_appointments(
   )
 
 
+@router.get(
+  "/appointments/internal/filter-options",
+  response_model=AppointmentFilterOptionsResponse,
+  tags=["Appointments"],
+)
+async def get_internal_appointment_filter_options(
+  db: AsyncSession = Depends(get_db, scope="function"),
+  current_user: User = Depends(role_required(*CASE_WORKER_ROLES)),
+):
+  """Return readable filters from the caller's complete office scope."""
+
+  return await AppointmentService.get_internal_filter_options(
+    db,
+    current_user=current_user,
+  )
+
+
 @router.post(
   "/appointments/{appointment_id}/reschedule",
   response_model=AppointmentResponse,
@@ -225,7 +243,7 @@ async def list_appointment_events(
   db: AsyncSession = Depends(get_db, scope="function"),
   current_user: User = Depends(get_current_user),
 ):
-  """Return a chronological appointment event page to an authorized reader."""
+  """Return a newest-first appointment event page to an authorized reader."""
 
   return await AppointmentService.get_events(
     db,

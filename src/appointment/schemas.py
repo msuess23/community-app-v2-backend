@@ -89,15 +89,44 @@ class AppointmentCancelRequest(StrictRequestModel):
 
 
 class AppointmentCompleteRequest(StrictRequestModel):
-  """Record an optional authority note for a completed appointment."""
+  """Record an optional internal authority note for a completed appointment."""
 
   comment: NormalizedOptionalText = Field(None, max_length=1000)
 
 
 class AppointmentNoShowRequest(StrictRequestModel):
-  """Record an optional authority note for a citizen no-show."""
+  """Record an optional internal authority note for a citizen no-show."""
 
   comment: NormalizedOptionalText = Field(None, max_length=1000)
+
+
+class AppointmentOfficeReference(BaseModel):
+  """Small office label embedded in an appointment response."""
+
+  id: UUID
+  name: str
+
+
+class AppointmentUserReference(BaseModel):
+  """Data-minimizing user label without account or contact information."""
+
+  id: UUID
+  display_name: str
+
+
+class AppointmentTicketReference(BaseModel):
+  """Small linked-ticket label and current caller access indication."""
+
+  id: UUID
+  title: str
+  can_view: bool
+
+
+class AppointmentFilterOptionsResponse(BaseModel):
+  """Readable filters derived only from the caller's appointment scope."""
+
+  citizens: list[AppointmentUserReference] = Field(default_factory=list)
+  tickets: list[AppointmentTicketReference] = Field(default_factory=list)
 
 
 class AppointmentResponse(BaseModel):
@@ -106,8 +135,11 @@ class AppointmentResponse(BaseModel):
   id: UUID
   current_slot_id: UUID | None
   office_id: UUID
+  office: AppointmentOfficeReference
   citizen_id: UUID
+  citizen: AppointmentUserReference
   ticket_id: UUID | None = None
+  ticket: AppointmentTicketReference | None = None
   reason: str | None = None
   status: AppointmentStatus
   starts_at: datetime
@@ -127,6 +159,7 @@ class AppointmentEventResponse(BaseModel):
   sequence_number: int
   event_type: AppointmentEventType
   actor_user_id: UUID | None = None
+  actor: AppointmentUserReference | None = None
   occurred_at: datetime
   payload: dict[str, Any]
 
