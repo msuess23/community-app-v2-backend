@@ -1,146 +1,210 @@
 import uuid
-from typing import List, Optional
+from datetime import datetime
+from typing import Any, ClassVar, Mapping
+
+from sqlalchemy import func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update
-from datetime import datetime
+from sqlalchemy.orm import InstrumentedAttribute
+from src.core.filters import (
+  LifecycleStatusFilter,
+  SortOrder,
+  apply_lifecycle_filter,
+  apply_search_filter,
+)
+from src.core.pagination import execute_page
+from src.user.models import Role, User, UserHistory, UserSortField
 
-from src.user.models import User, UserHistory, Role
-from src.core.filters import LifecycleStatusFilter, apply_lifecycle_filter, apply_search_filter
 
 class UserRepository:
-  """
-  Data access layer for User and UserHistory entities.
-  Handles all direct database interactions, filtering, and bulk operations.
-  """
+  """Data access layer for User and UserHistory entities."""
+
+  SORT_COLUMNS: ClassVar[Mapping[UserSortField, InstrumentedAttribute[Any]]] = {
+    UserSortField.CREATED_AT: User.created_at,
+    UserSortField.EMAIL: User.email,
+    UserSortField.FIRST_NAME: User.first_name,
+    UserSortField.LAST_NAME: User.last_name,
+    UserSortField.ROLE: User.role,
+  }
 
   @staticmethod
-  async def get_by_email(db: AsyncSession, email: str) -> Optional[User]:
-    """Fetches a user by email for authentication purposes."""
-    result = await db.execute(select(User).where(User.email == email))
+  async def get_by_email(db: AsyncSession, email: str) -> User | None:
+    """Load one user account by normalized email address."""
+
+    normalized_email = email.strip().lower()
+    result = await db.execute(
+      select(User).where(func.lower(User.email) == normalized_email)
+    )
     return result.scalar_one_or_none()
 
   @staticmethod
-  async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> Optional[User]:
-    """Fetches a user by their UUID."""
+  async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+    """Load one user account by identifier."""
+
     result = await db.execute(select(User).where(User.id == user_id))
     return result.scalar_one_or_none()
 
   @staticmethod
-  async def get_all(
-    db: AsyncSession, 
-    skip: int = 0, 
-    limit: int = 100,
-    office_id: Optional[uuid.UUID] = None,
-    role: Optional[Role] = None,
+  async def get_page(
+    db: AsyncSession,
+    *,
+    page: int,
+    size: int,
+    office_id: uuid.UUID | None = None,
+    role: Role | None = None,
     exclude_citizens: bool = False,
-    force_office_id: Optional[uuid.UUID] = None,
+    force_office_id: uuid.UUID | None = None,
     status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
-    search: Optional[str] = None
-  ) -> List[User]:
-    """
-    Retrieves users with dynamic filtering.
-    Applies security policies provided by the service layer (isolation and data minimization).
-    """
+    search: str | None = None,
+    sort_by: UserSortField = UserSortField.LAST_NAME,
+    order: SortOrder = SortOrder.ASC,
+  ) -> tuple[list[User], int]:
+    """Return a role-scoped, filtered, and paginated user list."""
+
     query = select(User)
-
-    # Lifecycle filter
     query = apply_lifecycle_filter(query, User, status)
+    query = apply_search_filter(
+      query,
+      search,
+      User.email,
+      User.first_name,
+      User.last_name,
+    )
 
-    # Text Search
-    query = apply_search_filter(query, search, User.email, User.first_name, User.last_name)
-    
-    # Office & Role Filter
     if office_id:
       query = query.where(User.office_id == office_id)
     if role:
       query = query.where(User.role == role)
-      
-    # Filter out citizens
     if exclude_citizens:
       query = query.where(User.role != Role.CITIZEN)
-      
-    # Apply Tenant Isolation constraints
     if force_office_id:
       query = query.where(User.office_id == force_office_id)
-      
-    query = query.order_by(User.last_name).offset(skip).limit(limit)
-    result = await db.execute(query)
-    return result.scalars().all()
+
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=UserRepository.SORT_COLUMNS[sort_by],
+      order=order,
+      tie_breaker=User.id,
+    )
+
+  @staticmethod
+  async def get_active_authority_users(
+    db: AsyncSession,
+    *,
+    roles: set[Role] | None = None,
+    office_id: uuid.UUID | None = None,
+  ) -> list[User]:
+    """Return active authority users for ticket workflow option building."""
+
+    query = select(User).where(
+      User.is_active.is_(True),
+      User.role != Role.CITIZEN,
+      User.role != Role.ADMIN,
+    )
+    if roles is not None:
+      query = query.where(User.role.in_(roles))
+    if office_id is not None:
+      query = query.where(User.office_id == office_id)
+    result = await db.execute(query.order_by(User.last_name, User.first_name, User.id))
+    return list(result.scalars().all())
+
+  @staticmethod
+  async def get_by_ids(db: AsyncSession, user_ids: set[uuid.UUID]) -> list[User]:
+    """Batch-load user references used by one ticket event page."""
+
+    if not user_ids:
+      return []
+    result = await db.execute(select(User).where(User.id.in_(user_ids)))
+    return list(result.scalars().all())
+
+  @staticmethod
+  async def has_active_users_for_office(
+    db: AsyncSession,
+    office_id: uuid.UUID,
+  ) -> bool:
+    """Return whether an office still owns active authority users."""
+
+    result = await db.execute(
+      select(User.id)
+      .where(
+        User.office_id == office_id,
+        User.is_active.is_(True),
+      )
+      .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
 
   @staticmethod
   def add(db: AsyncSession, user: User) -> None:
-    """Stages a user entity for insertion or update."""
+    """Stage a new user account in the current transaction."""
+
     db.add(user)
 
   @staticmethod
   def add_history(db: AsyncSession, history_entry: UserHistory) -> None:
-    """Stages an audit trail entry for insertion."""
+    """Stage an immutable user history snapshot."""
+
     db.add(history_entry)
 
   @staticmethod
-  async def bulk_anonymize_history(
-    db: AsyncSession, 
-    target_roles: list[Role], 
-    cutoff_date
+  async def bulk_anonymize_citizen_history(
+    db: AsyncSession,
+    cutoff_date: datetime,
   ) -> None:
-    """
-    Performs a bulk update on the UserHistory table to irreversibly anonymize 
-    old audit records based on retention policies.
-    """
-    subquery = select(User.id).where(
-      User.is_active == False,
-      User.role.in_(target_roles),
-      User.deactivated_at < cutoff_date
+    """Anonymizes old snapshots of long-deactivated citizen accounts."""
+    deactivated_citizens = select(User.id).where(
+      User.is_active.is_(False),
+      User.role == Role.CITIZEN,
+      User.deactivated_at.is_not(None),
+      User.deactivated_at < cutoff_date,
     )
-    
-    stmt = update(UserHistory).where(
-      UserHistory.user_id.in_(subquery),
-      UserHistory.email != "deleted@local.com"
-    ).values(
-      first_name="gelöschter",
-      last_name="Nutzer",
-      email="deleted@local.com"
+
+    stmt = (
+      update(UserHistory)
+      .where(
+        UserHistory.user_id.in_(deactivated_citizens),
+        or_(
+          UserHistory.email != "deleted@users.invalid",
+          UserHistory.first_name != "gelöschter",
+          UserHistory.last_name != "Nutzer",
+        ),
+      )
+      .values(
+        first_name="gelöschter",
+        last_name="Nutzer",
+        email="deleted@users.invalid",
+      )
     )
     await db.execute(stmt)
 
-
   @staticmethod
-  async def get_history_by_user_id(
-  db: AsyncSession, 
-  user_id: uuid.UUID,
-  start_date: Optional[datetime] = None,
-  end_date: Optional[datetime] = None
-  ) -> List[UserHistory]:
-    """Retrieves the audit trail for a specific user, newest first."""
-    records = []
+  async def get_history_page(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    page: int,
+    size: int,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+  ) -> tuple[list[UserHistory], int]:
+    """Return a paginated user history timeline."""
 
-    # Get last change that was made before the start_date as 
-    # it would still be active during part of the time frame
-    if start_date:
-      query_before = (
-        select(UserHistory)
-        .where(UserHistory.user_id == user_id, UserHistory.changed_at < start_date)
-        .order_by(UserHistory.changed_at.desc())
-        .limit(1)
-      )
-      result_before = await db.execute(query_before)
-      before_record = result_before.scalar_one_or_none()
-      if before_record:
-        records.append(before_record)
-
-    # Get all changes within the time frame
-    query_range = select(UserHistory).where(UserHistory.user_id == user_id)
+    query = select(UserHistory).where(UserHistory.user_id == user_id)
 
     if start_date:
-      query_range = query_range.where(UserHistory.changed_at >= start_date)
+      query = query.where(UserHistory.changed_at >= start_date)
     if end_date:
-      query_range = query_range.where(UserHistory.changed_at <= end_date)
+      query = query.where(UserHistory.changed_at <= end_date)
 
-    query_range = query_range.order_by(UserHistory.changed_at.desc())
-
-    result_range = await db.execute(query_range)
-    range_records = list(result_range.scalars().all())
-
-    # Combine both
-    return range_records + records
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=UserHistory.changed_at,
+      order=SortOrder.DESC,
+      tie_breaker=UserHistory.id,
+    )

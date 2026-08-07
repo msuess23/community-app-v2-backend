@@ -11,10 +11,7 @@ from alembic import context
 from src.core.database import Base
 from src.core.config import settings
 
-from src.user.models import User, UserHistory
-from src.office.models import Office, OfficeHistory
-from src.auth.models import PasswordReset, BlacklistedToken
-from src.address.models import Address
+import src.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -29,7 +26,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # Set the SQLAlchemy URL from our configuration settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 def run_migrations_offline() -> None:
   """Run migrations in 'offline' mode.

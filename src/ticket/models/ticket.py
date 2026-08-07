@@ -1,0 +1,187 @@
+"""Ticket projection and append-only event models."""
+
+from __future__ import annotations
+
+import enum
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import (
+  Column, DateTime, Enum, ForeignKey,
+  Integer, String, Text, UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import relationship
+
+from src.core.database import Base
+from src.ticket.domain import (
+  TicketCategory, TicketEventType, TicketStatus, TicketVisibility,
+  TicketWorkflowState,
+)
+
+class TicketSortField(str, enum.Enum):
+  """Allowed sort columns for ticket list endpoints."""
+
+  CREATED_AT = "created_at"
+  UPDATED_AT = "updated_at"
+  TITLE = "title"
+  STATUS = "status"
+
+
+class Ticket(Base):
+  """Current ticket projection used for lists and detail queries."""
+
+  __tablename__ = "tickets"
+
+  id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+  title = Column(String(255), nullable=False)
+  description = Column(Text, nullable=True)
+  category = Column(
+    Enum(TicketCategory, native_enum=False, length=32),
+    nullable=False,
+    index=True,
+  )
+  creator_user_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("users.id"),
+    nullable=False,
+    index=True,
+  )
+  office_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("offices.id"),
+    nullable=True,
+    index=True,
+  )
+  address_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("addresses.id"),
+    nullable=True,
+    unique=True,
+  )
+  visibility = Column(
+    Enum(TicketVisibility, native_enum=False, length=16),
+    nullable=False,
+    default=TicketVisibility.PUBLIC,
+  )
+  public_status = Column(
+    Enum(TicketStatus, native_enum=False, length=32),
+    nullable=False,
+    default=TicketStatus.OPEN,
+    index=True,
+  )
+  public_status_message = Column(String(500), nullable=True)
+  workflow_state = Column(
+    Enum(TicketWorkflowState, native_enum=False, length=48),
+    nullable=False,
+    default=TicketWorkflowState.NEW,
+    index=True,
+  )
+
+  # The primary officer remains the permanent case owner.  The current
+  # assignee may temporarily change during escalation or citizen input.
+  primary_officer_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("users.id"),
+    nullable=True,
+    index=True,
+  )
+  current_assignee_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("users.id"),
+    nullable=True,
+    index=True,
+  )
+  return_to_user_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("users.id"),
+    nullable=True,
+    index=True,
+  )
+
+  version = Column(Integer, nullable=False, default=1)
+  created_at = Column(
+    DateTime(timezone=True),
+    nullable=False,
+    default=lambda: datetime.now(timezone.utc),
+    index=True,
+  )
+  updated_at = Column(
+    DateTime(timezone=True),
+    nullable=False,
+    default=lambda: datetime.now(timezone.utc),
+    onupdate=lambda: datetime.now(timezone.utc),
+  )
+  completed_at = Column(DateTime(timezone=True), nullable=True)
+  cancelled_at = Column(DateTime(timezone=True), nullable=True)
+
+  creator = relationship("User", foreign_keys=[creator_user_id], lazy="selectin")
+  office = relationship("Office", lazy="selectin")
+  # Response serialization must use explicit eager loading instead of implicit SQL.
+  address = relationship(
+    "Address",
+    cascade="all, delete-orphan",
+    single_parent=True,
+    lazy="raise_on_sql",
+  )
+  primary_officer = relationship("User", foreign_keys=[primary_officer_id])
+  current_assignee = relationship(
+    "User",
+    foreign_keys=[current_assignee_id],
+  )
+  return_to_user = relationship(
+    "User",
+    foreign_keys=[return_to_user_id],
+  )
+  events = relationship(
+    "TicketEvent",
+    back_populates="ticket",
+    order_by="TicketEvent.sequence_number",
+  )
+  images = relationship(
+    "TicketImage",
+    back_populates="ticket",
+    cascade="all, delete-orphan",
+    order_by="TicketImage.uploaded_at",
+    lazy="raise_on_sql",
+  )
+
+
+class TicketEvent(Base):
+  """Immutable event belonging to one ticket aggregate stream."""
+
+  __tablename__ = "ticket_events"
+  __table_args__ = (
+    UniqueConstraint(
+      "ticket_id",
+      "sequence_number",
+      name="uq_ticket_events_ticket_sequence",
+    ),
+  )
+
+  id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+  ticket_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("tickets.id", ondelete="RESTRICT"),
+    nullable=False,
+    index=True,
+  )
+  sequence_number = Column(Integer, nullable=False)
+  event_type = Column(
+    Enum(TicketEventType, native_enum=False, length=64),
+    nullable=False,
+  )
+  actor_user_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("users.id"),
+    nullable=False,
+    index=True,
+  )
+  occurred_at = Column(
+    DateTime(timezone=True),
+    nullable=False,
+    default=lambda: datetime.now(timezone.utc),
+  )
+  payload = Column(JSONB, nullable=False, default=dict)
+  ticket = relationship("Ticket", back_populates="events")
+  actor = relationship("User", foreign_keys=[actor_user_id])

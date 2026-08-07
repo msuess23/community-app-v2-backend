@@ -1,0 +1,125 @@
+"""Centralized ticket authorization and capability calculation."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from src.core.exceptions import ConflictException, ForbiddenException
+from src.ticket.domain import TicketVisibility, TicketWorkflowState
+from src.ticket.models import Ticket
+from src.ticket.services.workflow_policy import TicketWorkflowPolicy
+from src.user.models import Role, User
+from src.user.roles import CASE_WORKER_ROLES
+
+
+@dataclass(frozen=True)
+class TicketCapabilities:
+  """Actions exposed by a ticket response and enforced by command services."""
+
+  can_edit: bool = False
+  can_manage_images: bool = False
+  can_comment: bool = False
+  can_view_internal: bool = False
+
+
+class TicketAccessPolicy:
+  """Evaluate public, citizen and authority-side ticket permissions."""
+
+  @staticmethod
+  def is_case_worker_participant(ticket: Ticket, current_user: User) -> bool:
+    """Return whether a case worker is an explicit ticket participant."""
+
+    if current_user.role not in CASE_WORKER_ROLES:
+      return False
+    if current_user.role == Role.MANAGER and current_user.office_id == ticket.office_id:
+      return True
+    return current_user.id in {
+      ticket.primary_officer_id,
+      ticket.current_assignee_id,
+      ticket.return_to_user_id,
+    }
+
+  @staticmethod
+  def is_dispatcher_routing_ticket(ticket: Ticket, current_user: User) -> bool:
+    """Return whether a dispatcher may inspect the current routing stage."""
+
+    return (
+      current_user.role == Role.DISPATCHER
+      and ticket.workflow_state in TicketWorkflowPolicy.ROUTING_STATES
+    )
+
+  @staticmethod
+  def can_view(ticket: Ticket, current_user: User | None) -> bool:
+    """Check whether a caller may see the citizen-facing representation."""
+
+    if ticket.visibility == TicketVisibility.PUBLIC:
+      return True
+    if current_user is None:
+      return False
+    if current_user.id == ticket.creator_user_id:
+      return True
+    return TicketAccessPolicy.can_view_internal(ticket, current_user)
+
+  @staticmethod
+  def can_view_internal(ticket: Ticket, current_user: User) -> bool:
+    """Check access to internal workflow data without granting admin access."""
+
+    return (
+      TicketAccessPolicy.is_dispatcher_routing_ticket(ticket, current_user)
+      or TicketAccessPolicy.is_case_worker_participant(ticket, current_user)
+    )
+
+  @staticmethod
+  def capabilities(ticket: Ticket, current_user: User | None) -> TicketCapabilities:
+    """Calculate response flags from the same rules used by commands."""
+
+    if current_user is None:
+      return TicketCapabilities()
+
+    is_creator = current_user.id == ticket.creator_user_id
+    can_edit = is_creator and ticket.workflow_state == TicketWorkflowState.NEW
+    can_view_internal = TicketAccessPolicy.can_view_internal(ticket, current_user)
+    can_manage_images = can_edit or (
+      current_user.role in CASE_WORKER_ROLES
+      and can_view_internal
+      and ticket.workflow_state != TicketWorkflowState.COMPLETED
+    )
+    can_comment = (
+      is_creator and ticket.workflow_state != TicketWorkflowState.COMPLETED
+    ) or can_view_internal
+    return TicketCapabilities(
+      can_edit=can_edit,
+      can_manage_images=can_manage_images,
+      can_comment=can_comment,
+      can_view_internal=can_view_internal,
+    )
+
+  @staticmethod
+  def require_manage_images(ticket: Ticket, current_user: User) -> None:
+    """Enforce citizen submission immutability and staff workflow access."""
+
+    if current_user.role == Role.CITIZEN:
+      if current_user.id != ticket.creator_user_id:
+        raise ForbiddenException("Only the ticket creator may manage these images")
+      if ticket.workflow_state != TicketWorkflowState.NEW:
+        raise ConflictException(
+          "Ticket images can no longer be changed after processing has started.",
+          error_code="TICKET_ALREADY_IN_PROCESS",
+        )
+      return
+
+    if current_user.role not in CASE_WORKER_ROLES:
+      raise ForbiddenException("Only assigned authority staff may manage ticket images")
+    if ticket.workflow_state == TicketWorkflowState.COMPLETED:
+      raise ConflictException(
+        "Images cannot be changed after the ticket is completed.",
+        error_code="TICKET_COMPLETED",
+      )
+    if not TicketAccessPolicy.can_manage_images(ticket, current_user):
+      raise ForbiddenException("The user has no internal access to this ticket")
+
+  @staticmethod
+  def can_manage_images(ticket: Ticket, current_user: User) -> bool:
+    """Return whether the caller may change the current image projection."""
+
+    return TicketAccessPolicy.capabilities(ticket, current_user).can_manage_images

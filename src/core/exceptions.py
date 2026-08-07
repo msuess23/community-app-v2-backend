@@ -1,68 +1,120 @@
-from fastapi import Request, status
-from fastapi.responses import JSONResponse
-from typing import Any, Dict, Optional
+from typing import Any
+
+from fastapi import status
+
+
+ErrorDetails = list[dict[str, Any]]
+
 
 class DomainException(Exception):
-  """
-  Base class for all custom domain exceptions.
-  Ensures a consistent error contract across the application.
-  """
+  """Base class for expected application errors."""
+
   def __init__(
-    self, 
-    message: str, 
-    error_code: str = "INTERNAL_SERVER_ERROR", 
-    status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
-    details: Optional[Dict[str, Any]] = None
-  ):
+    self,
+    message: str,
+    *,
+    error_code: str = "DOMAIN_ERROR",
+    status_code: int = status.HTTP_400_BAD_REQUEST,
+    details: ErrorDetails | None = None,
+  ) -> None:
+    """Initialize a domain exception with HTTP and machine-readable metadata."""
+
     self.message = message
     self.error_code = error_code
     self.status_code = status_code
-    self.details = details
-    super().__init__(self.message)
+    self.details = details or []
+    super().__init__(message)
+
 
 class ResourceNotFoundException(DomainException):
-  """Thrown when a database entity (User, Ticket, etc.) does not exist."""
-  def __init__(self, message: str = "The requested resource was not found."):
+  """Represent a missing domain resource as an HTTP 404 error."""
+
+  def __init__(
+    self,
+    message: str = "The requested resource was not found.",
+    *,
+    error_code: str = "RESOURCE_NOT_FOUND",
+  ) -> None:
+    """Initialize a not-found exception with a stable error code."""
+
     super().__init__(
-      message=message, 
-      error_code="RESOURCE_NOT_FOUND", 
-      status_code=status.HTTP_404_NOT_FOUND
+      message,
+      error_code=error_code,
+      status_code=status.HTTP_404_NOT_FOUND,
     )
+
+
+class ConflictException(DomainException):
+  """Represent a domain state conflict as an HTTP 409 error."""
+
+  def __init__(
+    self,
+    message: str = "The request conflicts with the current resource state.",
+    *,
+    error_code: str = "RESOURCE_CONFLICT",
+  ) -> None:
+    """Initialize a conflict exception with a stable error code."""
+
+    super().__init__(
+      message,
+      error_code=error_code,
+      status_code=status.HTTP_409_CONFLICT,
+    )
+
+
+class DomainValidationException(DomainException):
+  """Represent invalid domain input as an HTTP 422 error."""
+
+  def __init__(
+    self,
+    message: str = "The request contains invalid data.",
+    *,
+    error_code: str = "DOMAIN_VALIDATION_ERROR",
+    details: ErrorDetails | None = None,
+  ) -> None:
+    """Initialize a validation exception with field-independent metadata."""
+
+    super().__init__(
+      message,
+      error_code=error_code,
+      status_code=422,
+      details=details,
+    )
+
 
 class UnauthorizedException(DomainException):
-  """Thrown for missing or invalid authentication/authorization."""
-  def __init__(self, message: str = "You are not authorized to perform this action."):
+  """Authentication failed because credentials are missing or invalid."""
+
+  def __init__(self, message: str = "Could not validate credentials") -> None:
+    """Initialize an authentication failure response."""
+
     super().__init__(
-      message=message,
+      message,
       error_code="UNAUTHORIZED",
-      status_code=status.HTTP_401_UNAUTHORIZED
+      status_code=status.HTTP_401_UNAUTHORIZED,
     )
 
-class WorkflowValidationException(DomainException):
-  """Thrown when a ticket/appointment workflow operation violates business rules."""
-  def __init__(self, message: str = "Invalid workflow operation."):
+
+class ForbiddenException(DomainException):
+  """The authenticated user is not allowed to access the resource."""
+
+  def __init__(self, message: str = "Insufficient permissions") -> None:
+    """Initialize an authorization failure response."""
+
     super().__init__(
-      message=message,
-      error_code="WORKFLOW_VALIDATION_FAILED",
-      status_code=status.HTTP_400_BAD_REQUEST
+      message,
+      error_code="FORBIDDEN",
+      status_code=status.HTTP_403_FORBIDDEN,
     )
 
-# --- Global Exception Handlers ---
 
-async def domain_exception_handler(request: Request, exc: DomainException) -> JSONResponse:
-  """
-  Catches all DomainExceptions and formats them into a standard JSON payload.
-  This handler will be registered in main.py.
-  """
-  content = {
-    "error_code": exc.error_code,
-    "message": exc.message
-  }
-  
-  if exc.details:
-    content["details"] = exc.details
-    
-  return JSONResponse(
-    status_code=exc.status_code,
-    content=content
-  )
+class WorkflowValidationException(DomainValidationException):
+  """Represent an invalid workflow transition as an HTTP 422 error."""
+
+  def __init__(self, message: str = "Invalid workflow operation.") -> None:
+    """Initialize an invalid workflow-transition response."""
+
+    super().__init__(
+      message,
+      error_code="WORKFLOW_VALIDATION_FAILED",
+    )

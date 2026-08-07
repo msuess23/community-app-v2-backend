@@ -1,17 +1,28 @@
+import logging
 from typing import AsyncGenerator
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
 from src.core.config import settings
+from src.core.transaction_files import (
+  clear_commit_file_deletes,
+  clear_rollback_files,
+  cleanup_commit_file_deletes,
+  cleanup_rollback_files,
+)
+
+
+logger = logging.getLogger(__name__)
 
 # Create async engine for PostgreSQL
 engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=30,
-    pool_recycle=1800
+  settings.DATABASE_URL,
+  echo=False,
+  pool_size=10,
+  max_overflow=20,
+  pool_timeout=30,
+  pool_recycle=1800,
 )
 
 # Configure session factory
@@ -26,13 +37,24 @@ AsyncSessionLocal = async_sessionmaker(
 # Base class for ORM models
 Base = declarative_base()
 
-# FastAPI dependency for DB sessions
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+  """Provide one transaction-scoped session and commit it before the response."""
+
   async with AsyncSessionLocal() as session:
     try:
       yield session
+      await session.commit()
     except Exception:
       await session.rollback()
+      clear_commit_file_deletes(session)
+      cleanup_rollback_files(session)
       raise
-    finally:
-      await session.close()
+    else:
+      clear_rollback_files(session)
+      try:
+        cleanup_commit_file_deletes(session)
+      except Exception:
+        # The commit is already durable. Cleanup failures must remain observable
+        # without turning a successful request into a false transaction error.
+        logger.exception("Unexpected post-commit file cleanup failure")

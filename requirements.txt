@@ -1,5 +1,5 @@
 # --- Web-Framework & Server ---
-fastapi>=0.109.0            # Web Framework
+fastapi>=0.121.0            # Web Framework
 uvicorn[standard]>=0.27.0   # Async ASGI Server
 python-multipart>=0.0.9     # OAuth2 Login (Form-Data)
 
@@ -16,6 +16,9 @@ pydantic-settings>=2.1.0    # Env Variables
 # --- Security & Authentication ---
 bcrypt>=4.1.2               # PW Hashing
 PyJWT>=2.8.0                # Tokens
+
+# --- Media ---
+Pillow>=10.2.0              # Image signature and dimension validation
 
 # --- Support ---
 python-dotenv>=1.0.1        # Env Variables

@@ -1,107 +1,149 @@
 import uuid
-from typing import List, Optional, Tuple
+from datetime import datetime
+from typing import Any, ClassVar, Mapping
+
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
-from datetime import datetime
-
-from src.office.models import Office, OfficeHistory
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
 from src.address.models import Address
-from src.core.filters import apply_bbox_filter, apply_search_filter, apply_lifecycle_filter, LifecycleStatusFilter
+from src.core.filters import (
+  LifecycleStatusFilter,
+  SortOrder,
+  apply_bbox_filter,
+  apply_lifecycle_filter,
+  apply_search_filter,
+)
+from src.core.pagination import execute_page
+from src.office.models import Office, OfficeHistory, OfficeSortField
+
 
 class OfficeRepository:
-  """
-  Data access layer for Office and OfficeHistory entities.
-  """
+  """Data access layer for Office and OfficeHistory entities."""
+
+  SORT_COLUMNS: ClassVar[Mapping[OfficeSortField, InstrumentedAttribute[Any]]] = {
+    OfficeSortField.CREATED_AT: Office.created_at,
+    OfficeSortField.NAME: Office.name,
+    OfficeSortField.CONTACT_EMAIL: Office.contact_email,
+  }
 
   @staticmethod
-  async def get_by_id(db: AsyncSession, office_id: uuid.UUID) -> Optional[Office]:
+  async def get_by_id(db: AsyncSession, office_id: uuid.UUID) -> Office | None:
+    """Load one office and its owned address by identifier."""
+
     result = await db.execute(
-      select(Office).options(selectinload(Office.address)).where(Office.id == office_id)
+      select(Office)
+      .options(selectinload(Office.address))
+      .where(Office.id == office_id)
     )
     return result.scalar_one_or_none()
 
-
   @staticmethod
-  async def get_by_name(db: AsyncSession, name: str) -> Optional[Office]:
+  async def get_by_name(db: AsyncSession, name: str) -> Office | None:
+    """Returns the first match; office names are intentionally not unique."""
     result = await db.execute(
-      select(Office).options(selectinload(Office.address)).where(Office.name == name)
+      select(Office)
+      .options(selectinload(Office.address))
+      .where(func.lower(Office.name) == name.strip().lower())
+      .order_by(Office.created_at, Office.id)
+      .limit(1)
     )
-    return result.scalar_one_or_none()
-
+    return result.scalars().first()
 
   @staticmethod
-  async def get_all(
+  async def get_active_offices(db: AsyncSession) -> list[Office]:
+    """Return active offices selectable by the ticket dispatcher."""
+
+    result = await db.execute(
+      select(Office).where(Office.is_active.is_(True)).order_by(Office.name, Office.id)
+    )
+    return list(result.scalars().all())
+
+  @staticmethod
+  async def get_by_ids(db: AsyncSession, office_ids: set[uuid.UUID]) -> list[Office]:
+    """Batch-load office references used by one ticket event page."""
+
+    if not office_ids:
+      return []
+    result = await db.execute(select(Office).where(Office.id.in_(office_ids)))
+    return list(result.scalars().all())
+
+  @staticmethod
+  async def get_page(
     db: AsyncSession,
-    skip: int = 0,
-    limit: int = 100,
+    *,
+    page: int,
+    size: int,
     status: LifecycleStatusFilter = LifecycleStatusFilter.ACTIVE,
-    search: Optional[str] = None,
-    bbox: Optional[Tuple[float, float, float, float]] = None
-  ) -> List[Office]:
-    """
-    Retrieves a list of offices with optional spatial bounding box and text search.
-    """
+    search: str | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
+    sort_by: OfficeSortField = OfficeSortField.NAME,
+    order: SortOrder = SortOrder.ASC,
+  ) -> tuple[list[Office], int]:
+    """Return a filtered, sorted, and paginated page of offices."""
+
     query = select(Office).options(selectinload(Office.address))
-    
     query = apply_lifecycle_filter(query, Office, status)
-    query = apply_search_filter(query, search, Office.name, Office.description)
+    query = apply_search_filter(
+      query,
+      search,
+      Office.name,
+      Office.description,
+      Office.contact_email,
+    )
 
     if bbox:
       query = query.join(Office.address)
       query = apply_bbox_filter(query, Address, bbox)
-      
-    query = query.order_by(Office.name).offset(skip).limit(limit)
-    result = await db.execute(query)
-    return result.scalars().all()
 
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=OfficeRepository.SORT_COLUMNS[sort_by],
+      order=order,
+      tie_breaker=Office.id,
+      unique=True,
+    )
 
   @staticmethod
   def add(db: AsyncSession, office: Office) -> None:
-    db.add(office)
+    """Stage a new office row in the current transaction."""
 
+    db.add(office)
 
   @staticmethod
   def add_history(db: AsyncSession, history_entry: OfficeHistory) -> None:
+    """Stage an immutable office history snapshot."""
+
     db.add(history_entry)
 
-
   @staticmethod
-  async def get_history_by_office_id(
-    db: AsyncSession, 
+  async def get_history_page(
+    db: AsyncSession,
     office_id: uuid.UUID,
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None
-    ) -> List[OfficeHistory]:
-    """Retrieves the audit trail for a specific office, newest first."""
-    records = []
+    *,
+    page: int,
+    size: int,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+  ) -> tuple[list[OfficeHistory], int]:
+    """Return a paginated office history timeline."""
 
-    # Get last change that was made before the start_date as 
-    # it would still be active during part of the time frame
-    if start_date:
-      query_before = (
-        select(OfficeHistory)
-        .where(OfficeHistory.office_id == office_id, OfficeHistory.changed_at < start_date)
-        .order_by(OfficeHistory.changed_at.desc())
-        .limit(1)
-      )
-      result_before = await db.execute(query_before)
-      before_record = result_before.scalar_one_or_none()
-      if before_record:
-        records.append(before_record)
-
-    # Get all changes within the time frame
-    query_range = select(OfficeHistory).where(OfficeHistory.office_id == office_id)
+    query = select(OfficeHistory).where(OfficeHistory.office_id == office_id)
 
     if start_date:
-      query_range = query_range.where(OfficeHistory.changed_at >= start_date)
+      query = query.where(OfficeHistory.changed_at >= start_date)
     if end_date:
-      query_range = query_range.where(OfficeHistory.changed_at <= end_date)
+      query = query.where(OfficeHistory.changed_at <= end_date)
 
-    query_range = query_range.order_by(OfficeHistory.changed_at.desc())
-
-    result_range = await db.execute(query_range)
-    range_records = list(result_range.scalars().all())
-
-    # Combine both
-    return range_records + records
+    return await execute_page(
+      db,
+      query,
+      page=page,
+      size=size,
+      sort_column=OfficeHistory.changed_at,
+      order=SortOrder.DESC,
+      tie_breaker=OfficeHistory.id,
+    )
