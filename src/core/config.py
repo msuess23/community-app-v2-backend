@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     default_factory=lambda: [
       "http://localhost:3000",
       "http://localhost:5173",
+      "http://tauri.localhost",
+      "tauri://localhost",
     ]
   )
 

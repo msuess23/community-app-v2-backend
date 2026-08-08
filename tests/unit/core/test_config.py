@@ -52,6 +52,14 @@ def test_scheduler_and_cors_settings_are_configurable():
   assert configured.CORS_ORIGINS == ["http://localhost:5173"]
 
 
+def test_default_cors_configuration_supports_tauri_clients(monkeypatch):
+  monkeypatch.delenv("CORS_ORIGINS", raising=False)
+  configured = create_settings()
+
+  assert "http://tauri.localhost" in configured.CORS_ORIGINS
+  assert "tauri://localhost" in configured.CORS_ORIGINS
+
+
 def test_database_url_escapes_credentials_with_reserved_characters():
   from sqlalchemy.engine import make_url
 

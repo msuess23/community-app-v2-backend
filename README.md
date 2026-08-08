@@ -208,6 +208,28 @@ Die API-Routen beginnen standardmäßig mit:
 /api/v1
 ```
 
+### Native Tauri-Clients
+
+Der Behördenclient kann zusätzlich als Tauri-2-Anwendung ausgeführt werden. Die lokale
+Entwicklungskonfiguration erlaubt deshalb neben den Browser-Origins standardmäßig auch die
+Tauri-WebView-Origins `http://tauri.localhost` (Windows/Android) und `tauri://localhost`
+(macOS/Linux). In produktiven Umgebungen sollte `CORS_ORIGINS` weiterhin explizit auf die
+tatsächlich verwendeten Client-Origins begrenzt werden.
+
+Für einen Desktop-Client auf demselben Rechner kann das Backend wie gewohnt unter
+`http://localhost:8000` erreichbar sein. Auf Android bezeichnet `localhost` dagegen das
+Android-Gerät beziehungsweise den Emulator selbst. Für lokale Tests gelten deshalb typischerweise:
+
+```text
+Desktop:             http://localhost:8000/api/v1
+Android-Emulator:    http://10.0.2.2:8000/api/v1
+Physisches Android:  http://<LAN-IP-des-Entwicklungsrechners>:8000/api/v1
+```
+
+Für Emulator und physisches Gerät muss Uvicorn mit `--host 0.0.0.0` lauschen. Bei einem
+physischen Gerät müssen sich Rechner und Gerät außerdem im selben erreichbaren Netz befinden.
+Release-Builds sollten gegen ein über HTTPS erreichbares Backend konfiguriert werden.
+
 # Schnellstart in einem Block
 
 Nach dem Anlegen und Prüfen der `.env`-Datei:
